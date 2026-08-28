@@ -8,7 +8,7 @@
 
 <br>
 
-<img src="assets/biome-hero.png" alt="FairRSFM biome landscape overview" width="100%">
+<img src="assets/fairrsfm-architecture.png" alt="FairRSFM benchmark and debiasing architecture" width="100%">
 
 </div>
 
@@ -146,9 +146,9 @@ Unknown, water-only, or unmatched samples are excluded from the primary worst-gr
 FairRSFM/
 |-- README.md
 `-- assets/
-|   |-- biome-hero.png
-|   |-- fairrsfm-framework.pdf
-|   |-- fairrsfm-paper.pdf
+    |-- fairrsfm-architecture.png
+    |-- fairrsfm-framework.pdf
+    |-- fairrsfm-paper.pdf
     `-- macro-group-distribution.png
 ```
 
