@@ -231,4 +231,11 @@ The citation will be updated with the final author list and arXiv identifier whe
 
 ## Acknowledgements
 
-FairRSFM builds on GEO-Bench, MMEarth, Dynamic World, global terrestrial ecoregion products, and the official Prithvi-EO-2.0, SatMAE, and DOFA releases. We thank the maintainers of these datasets, models, and open-source tools.
+FairRSFM builds on the following public benchmarks, datasets, and model
+codebases:
+
+- **Benchmarks and data:** [GEO-Bench](https://github.com/ServiceNow/geo-bench), [MMEarth](https://github.com/vishalned/MMEarth-data), [Dynamic World](https://developers.google.com/earth-engine/datasets/catalog/GOOGLE_DYNAMICWORLD_V1), and [RESOLVE Ecoregions 2017](https://developers.google.com/earth-engine/datasets/catalog/RESOLVE_ECOREGIONS_2017).
+- **Foundation-model code:** [Prithvi-EO-2.0](https://github.com/NASA-IMPACT/Prithvi-EO-2.0), [SatMAE](https://github.com/sustainlab-group/SatMAE), and [DOFA](https://github.com/zhu-xlab/DOFA).
+
+We thank the maintainers and contributors of these datasets, models, and
+open-source tools.
