@@ -2,9 +2,9 @@
 
 # FairRSFM: A Biome-Aware Benchmark and Debiasing Framework for Remote Sensing Foundation Models
 
-**Anonymous WACV 2027 Submission #2158**
+**Authors and affiliations will be added with the public paper release.**
 
-[Paper PDF](assets/fairrsfm-paper.pdf) | [Framework figure](assets/fairrsfm-framework.pdf) | [Repository](https://github.com/aminurhossain/FairRSFM)
+[arXiv (coming soon)](https://arxiv.org/abs/XXXX.XXXXX) | [Hugging Face dataset (coming soon)](https://huggingface.co/datasets/aminurhossain/FairRSFM) | [Repository](https://github.com/aminurhossain/FairRSFM)
 
 <br>
 
@@ -22,8 +22,9 @@ Using Prithvi-EO-2.0, SatMAE, and DOFA, the benchmark shows that strong aggregat
 
 ## News
 
-- **August 2026:** FairRSFM repository and revised WACV 2027 manuscript released.
-- **Code release:** Training, preprocessing, and evaluation code is being prepared for release in this repository.
+- **Coming soon:** FairRSFM paper on arXiv.
+- **Coming soon:** FairRSFM benchmark data on Hugging Face.
+- **Coming soon:** Training, preprocessing, and evaluation code.
 
 ## Highlights
 
@@ -95,7 +96,7 @@ Biome-Orthogonal Linear Probing (BOLP) acts directly on frozen embeddings:
 
 BOLP is closed-form, leaves the RSFM backbone unchanged, and adds no trainable parameters beyond the downstream head.
 
-[View the full framework figure](assets/fairrsfm-framework.pdf)
+[View the architecture figure](assets/fairrsfm-architecture.png)
 
 ## Main Results
 
@@ -147,28 +148,27 @@ FairRSFM/
 |-- README.md
 `-- assets/
     |-- fairrsfm-architecture.png
-    |-- fairrsfm-framework.pdf
-    |-- fairrsfm-paper.pdf
     `-- macro-group-distribution.png
 ```
 
-The current repository snapshot contains the paper PDF, figures, and release documentation. Training, preprocessing, and evaluation code will be added to the same repository.
+The current repository snapshot contains the project overview, benchmark results, and figures. Training, preprocessing, and evaluation code will be added to the same repository.
 
-## Paper
+## Download
 
-- [Read the paper](assets/fairrsfm-paper.pdf)
-- [View the framework figure](assets/fairrsfm-framework.pdf)
+- **Paper:** [arXiv release coming soon](https://arxiv.org/abs/XXXX.XXXXX)
+- **Dataset:** [Hugging Face release coming soon](https://huggingface.co/datasets/aminurhossain/FairRSFM)
+- **Code:** Training and evaluation code will be released in this repository.
 
 ## Citation
 
-The manuscript is currently under anonymous review. A final citation with author information and publication metadata will be added after the review process.
+The citation will be updated with the final author list and arXiv identifier when the public paper is released.
 
 ```bibtex
-@misc{anonymous2027fairrsfm,
-  title  = {FairRSFM: A Biome-Aware Benchmark and Debiasing Framework for Remote Sensing Foundation Models},
-  author = {Anonymous},
-  note   = {Anonymous WACV 2027 submission},
-  year   = {2027}
+@article{fairrsfm2027,
+  title   = {FairRSFM: A Biome-Aware Benchmark and Debiasing Framework for Remote Sensing Foundation Models},
+  author  = {FairRSFM Team},
+  journal = {arXiv preprint},
+  year    = {2027}
 }
 ```
 
