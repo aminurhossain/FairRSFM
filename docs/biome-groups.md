@@ -12,7 +12,7 @@ FairRSFM defines **biome bias** as a systematic disparity in downstream RSFM per
 
 1. Read the sample's georeferenced patch extent.
 2. Compute its centroid latitude and longitude.
-3. Spatially join the centroid with an external terrestrial ecoregion reference map.
+3. Spatially join the centroid with the [RESOLVE Ecoregions 2017](https://developers.google.com/earth-engine/datasets/catalog/RESOLVE_ECOREGIONS_2017) reference map.
 4. Store the resulting raw biome ID as sample metadata.
 5. Map the raw biome ID to one of six macro-groups.
 
@@ -43,12 +43,12 @@ Directly treating all 14 labels as primary groups can produce unstable estimates
 
 | ID | Macro-group | Included raw biomes | Physical and remote sensing rationale |
 |---:|---|---|---|
-| 1 | Aseasonal High-Biomass | 1 Tropical Moist Forests; 3 Tropical Conifer Forests; 5 Temperate Conifer Forests | Dense, high-biomass vegetation with relatively persistent canopy structure and strong near-infrared response. |
+| 1 | Aseasonal High-Biomass | 1 Tropical Moist Forests; 3 Tropical Conifer Forests; 5 Temperate Conifer Forests | Dense, high-biomass vegetation with relatively persistent canopy structure. |
 | 2 | High-Amplitude Phenological | 2 Tropical Dry Forests; 4 Temperate Broadleaf and Mixed Forests; 6 Boreal Forests / Taiga | Forested regions characterized by strong seasonal or phenological variation. |
-| 3 | Transitional Herbaceous and Scrub | 7 Tropical Grasslands / Savannas / Shrublands; 8 Temperate Grasslands / Savannas / Shrublands; 12 Mediterranean Forests / Woodlands / Scrub | Open or mixed vegetation with heterogeneous grass, shrub, soil, and canopy signals. |
-| 4 | Cryospheric and Short-Cycle | 10 Montane Grasslands and Shrublands; 11 Tundra | Temperature-restricted ecosystems with cryospheric influence and short growing periods. |
-| 5 | Xeric and Mineralogical | 13 Deserts and Xeric Shrublands | Vegetation-sparse surfaces dominated by albedo, exposed soil, rock, and mineral background. |
-| 6 | Hydrologically Modulated | 9 Flooded Grasslands and Savannas; 14 Mangroves | Water-influenced ecosystems where inundation strongly changes infrared and vegetation response. |
+| 3 | Transitional Herbaceous and Scrub | 7 Tropical Grasslands / Savannas / Shrublands; 8 Temperate Grasslands / Savannas / Shrublands; 12 Mediterranean Forests / Woodlands / Scrub | Open or mixed vegetation with strong grass, shrub, soil, and canopy heterogeneity. |
+| 4 | Cryospheric and Short-Cycle | 10 Montane Grasslands and Shrublands; 11 Tundra | Temperature-restricted ecosystems with short growing periods or cryospheric influence. |
+| 5 | Xeric and Mineralogical | 13 Deserts and Xeric Shrublands | Vegetation-sparse surfaces dominated by albedo, exposed soil, and mineral background. |
+| 6 | Hydrologically Modulated | 9 Flooded Grasslands and Savannas; 14 Mangroves | Water-influenced ecosystems where inundation strongly affects spectral response. |
 
 ## Global Distribution
 
@@ -73,6 +73,10 @@ The macro-groups are intended as ecological analysis strata rather than administ
 <p align="center">
   <img src="../assets/macro-group-distribution.png" alt="MMEarth20K group composition by split" width="95%">
 </p>
+
+The distribution figure retains the zero-based plotting indices used by the
+experiment artifact: Groups 0-5 correspond in order to taxonomy IDs 1-6 in the
+table above.
 
 ## Dataset Coverage
 

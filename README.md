@@ -16,6 +16,8 @@
 
 <p align="center">
   <img src="assets/fairrsfm-architecture.png" alt="FairRSFM benchmark and debiasing architecture" width="100%">
+  <br>
+  <sub>FairRSFM pipeline. Prithvi-EO-2.0 is shown as the illustrative frozen encoder; the same controlled protocol is evaluated with Prithvi-EO-2.0, SatMAE, and DOFA.</sub>
 </p>
 
 > **TL;DR:** Aggregate RSFM scores can hide large ecological performance gaps. FairRSFM assigns georeferenced samples to terrestrial biomes, consolidates them into six remote-sensing-relevant macro-groups, and evaluates frozen foundation models with worst-group, calibration, and parity metrics. It also benchmarks biome-aware mitigation through DBR, BOLP, and GroupDRO.
@@ -65,18 +67,18 @@ Remote sensing foundation models (RSFMs) are normally compared using aggregate a
 
 | Dataset | Task | Classes | Train | Val | Test | Primary metric |
 |---|---|---:|---:|---:|---:|---|
-| m-EuroSAT | Single-label land-cover classification | 10 | 2,000 | 1,000 | 1,000 | Macro-F1 |
-| m-BigEarthNet | Multi-label land-cover classification | 43 | 20,000 | 1,000 | 1,000 | F1@opt |
-| m-SA-Crop-Type | Crop-type segmentation | 10 | 3,000 | 1,000 | 1,000 | mIoU |
-| MMEarth20K | Dynamic World land-cover segmentation | 9 | 16,000 | 2,000 | 2,000 | mIoU |
+| [m-EuroSAT](https://github.com/ServiceNow/geo-bench) | Single-label land-cover classification | 10 | 2,000 | 1,000 | 1,000 | Macro-F1 |
+| [m-BigEarthNet](https://github.com/ServiceNow/geo-bench) | Multi-label land-cover classification | 43 | 20,000 | 1,000 | 1,000 | F1@opt |
+| [m-SA-Crop-Type](https://github.com/ServiceNow/geo-bench) | Crop-type segmentation | 10 | 3,000 | 1,000 | 1,000 | mIoU |
+| [MMEarth20K](https://github.com/vishalned/MMEarth-data) | [Dynamic World](https://developers.google.com/earth-engine/datasets/catalog/GOOGLE_DYNAMICWORLD_V1) land-cover segmentation | 9 | 16,000 | 2,000 | 2,000 | mIoU |
 
 ### Frozen foundation models
 
 | Backbone | Architecture | Parameters | Embedding | Input configuration |
 |---|---|---:|---:|---|
-| Prithvi-EO-2.0 | Spatio-temporal ViT | 300M | 1024 | 6 HLS bands |
-| SatMAE | ViT-Large | 304M | 1024 | 10 Sentinel-2 bands |
-| DOFA | ViT-Base | 86M | 768 | 9-12 wavelength-conditioned bands |
+| [Prithvi-EO-2.0](https://github.com/NASA-IMPACT/Prithvi-EO-2.0) | Spatio-temporal ViT | 300M | 1024 | 6 HLS bands |
+| [SatMAE](https://github.com/sustainlab-group/SatMAE) | ViT-Large | 304M | 1024 | 10 Sentinel-2 bands |
+| [DOFA](https://github.com/zhu-xlab/DOFA) | ViT-Base | 86M | 768 | 9-12 wavelength-conditioned bands |
 
 All encoders remain frozen. Only a classification probe or lightweight segmentation decoder is trained. Experiments use 224 x 224 inputs, AdamW with cosine scheduling, 50 epochs, validation-based checkpoint selection, and three random seeds.
 
@@ -100,7 +102,7 @@ See **[Benchmark and experimental protocol](docs/benchmark.md)** for full config
 <p align="center">
   <img src="assets/macro-group-distribution.png" alt="MMEarth20K distribution across the six biome macro-groups" width="90%">
   <br>
-  <sub>MMEarth20K composition across macro-groups and the 80/10/10 train, validation, and test splits.</sub>
+  <sub>MMEarth20K composition across macro-groups and the 80/10/10 train, validation, and test splits. The figure uses zero-based display indices (Groups 0-5), corresponding in order to taxonomy IDs 1-6 above.</sub>
 </p>
 
 See **[Biome taxonomy and labeling](docs/biome-groups.md)** for the complete 14-class mapping, rationales, metadata schema, and split counts.
@@ -120,7 +122,7 @@ See **[Methods and evaluation metrics](docs/methods.md)** for the full DBR updat
 
 ## Headline Results
 
-The table summarizes the mean performance over three seeds. `ERM O/W` denotes the original ERM overall and worst-group scores. The last two columns show the strongest overall and worst-group scores among all evaluated methods for each backbone and dataset.
+The table summarizes percentage scores averaged over three seeds. `ERM O/W` denotes the original ERM overall and worst-group scores. The last two columns show the strongest overall and worst-group scores among all evaluated methods for each backbone and dataset.
 
 | Backbone | Dataset | ERM O/W | Best overall | Best worst-group |
 |---|---|---:|---:|---:|
@@ -186,6 +188,7 @@ the current tree does not claim executable training code.
 
 ```text
 FairRSFM/
+|-- .gitattributes
 |-- .gitignore
 |-- README.md
 |-- assets/
@@ -218,16 +221,9 @@ FairRSFM/
 
 ## Citation
 
-The citation will be updated with the final author list and arXiv identifier when the public paper is released.
-
-```bibtex
-@article{fairrsfm2027,
-  title   = {FairRSFM: A Biome-Aware Benchmark and Debiasing Framework for Remote Sensing Foundation Models},
-  author  = {FairRSFM Team},
-  journal = {arXiv preprint},
-  year    = {2027}
-}
-```
+Formal BibTeX metadata will be added when the public author list and arXiv
+identifier are available. No provisional author record is provided to avoid an
+incorrect citation entering bibliographic databases.
 
 ## Acknowledgements
 

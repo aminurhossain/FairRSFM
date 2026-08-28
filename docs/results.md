@@ -10,6 +10,8 @@
 - Higher Overall and Worst are better.
 - Lower ECE, NFR, EOdd, and DPM are better.
 - All encoders are frozen; only the downstream head or lightweight decoder is trained.
+- Worst-group scores are computed within each seed and then summarized across seeds. They therefore need not equal the minimum of the rounded biome-wise means shown later.
+- The values below were transcribed from the revised submission tables and independently checked in table order.
 
 ## Global and Robustness Results
 

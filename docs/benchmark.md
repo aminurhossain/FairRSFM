@@ -17,14 +17,14 @@ The benchmark covers:
 
 | Dataset | Source suite | Task | Classes | Train | Validation | Test | Sensor / labels | Primary score |
 |---|---|---|---:|---:|---:|---:|---|---|
-| m-EuroSAT | GEO-Bench | Single-label classification | 10 | 2,000 | 1,000 | 1,000 | Sentinel-2 land cover | Macro-F1 |
-| m-BigEarthNet | GEO-Bench | Multi-label classification | 43 | 20,000 | 1,000 | 1,000 | Sentinel-2 multi-label land cover | F1@opt |
-| m-SA-Crop-Type | GEO-Bench | Semantic segmentation | 10 | 3,000 | 1,000 | 1,000 | Sentinel-2 crop type | mIoU |
-| MMEarth20K | MMEarth subset | Semantic segmentation | 9 | 16,000 | 2,000 | 2,000 | Sentinel-2 with Dynamic World maps | mIoU |
+| m-EuroSAT | [GEO-Bench](https://github.com/ServiceNow/geo-bench) | Single-label classification | 10 | 2,000 | 1,000 | 1,000 | Sentinel-2 land cover | Macro-F1 |
+| m-BigEarthNet | [GEO-Bench](https://github.com/ServiceNow/geo-bench) | Multi-label classification | 43 | 20,000 | 1,000 | 1,000 | Sentinel-2 multi-label land cover | F1@opt |
+| m-SA-Crop-Type | [GEO-Bench](https://github.com/ServiceNow/geo-bench) | Semantic segmentation | 10 | 3,000 | 1,000 | 1,000 | Sentinel-2 crop type | mIoU |
+| MMEarth20K | [MMEarth](https://github.com/vishalned/MMEarth-data) subset | Semantic segmentation | 9 | 16,000 | 2,000 | 2,000 | Sentinel-2 with [Dynamic World](https://developers.google.com/earth-engine/datasets/catalog/GOOGLE_DYNAMICWORLD_V1) maps | mIoU |
 
 ### MMEarth20K construction
 
-MMEarth20K is a 20,000-sample subset with Dynamic World-derived 10 m land-cover label maps. Its fixed 80/10/10 split supports dense biome-aware evaluation while retaining all six macro-groups. The sample composition is intentionally imbalanced across groups so that evaluation can measure ecological robustness under unequal coverage.
+MMEarth20K is a 20,000-sample subset with Dynamic World-derived 10 m land-cover label maps. Its fixed 80/10/10 split supports dense biome-aware evaluation while retaining all six macro-groups. The retained sample composition is imbalanced across groups, enabling evaluation of ecological robustness under unequal coverage.
 
 ## Biome Metadata
 
@@ -51,7 +51,7 @@ Unknown, water-only, and unmatched samples are reported separately. They are exc
 
 ## Frozen Foundation Models
 
-| Configuration | Prithvi-EO-2.0 | SatMAE | DOFA |
+| Configuration | [Prithvi-EO-2.0](https://github.com/NASA-IMPACT/Prithvi-EO-2.0) | [SatMAE](https://github.com/sustainlab-group/SatMAE) | [DOFA](https://github.com/zhu-xlab/DOFA) |
 |---|---|---|---|
 | Backbone | Spatio-temporal ViT | ViT-Large | ViT-Base |
 | Parameters | 300M | 304M | 86M |
