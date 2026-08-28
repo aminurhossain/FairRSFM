@@ -1,163 +1,197 @@
 <div align="center">
 
-# FairRSFM: A Biome-Aware Benchmark and Debiasing Framework for Remote Sensing Foundation Models
+# FairRSFM
 
-**Authors and affiliations will be added with the public paper release.**
+### A Biome-Aware Benchmark and Debiasing Framework for Remote Sensing Foundation Models
 
-[arXiv (coming soon)](https://arxiv.org/abs/XXXX.XXXXX) | [Hugging Face dataset (coming soon)](https://huggingface.co/datasets/aminurhossain/FairRSFM) | [Repository](https://github.com/aminurhossain/FairRSFM)
+**Author list and affiliations will be added with the public paper release.**
 
-<br>
+[![arXiv](https://img.shields.io/badge/arXiv-coming%20soon-B31B1B.svg)](https://arxiv.org/abs/XXXX.XXXXX)
+[![Dataset](https://img.shields.io/badge/Hugging%20Face-dataset%20coming%20soon-FFD21E.svg)](https://huggingface.co/datasets/aminurhossain/FairRSFM)
+[![Code](https://img.shields.io/badge/code-in%20preparation-2F6F3E.svg)](https://github.com/aminurhossain/FairRSFM)
 
-<img src="assets/fairrsfm-architecture.png" alt="FairRSFM benchmark and debiasing architecture" width="100%">
+**[Overview](#overview) | [Benchmark](#benchmark) | [Methods](#debiasing-methods) | [Results](#headline-results) | [Documentation](#documentation) | [Citation](#citation)**
 
 </div>
 
-## Overview
+<p align="center">
+  <img src="assets/fairrsfm-architecture.png" alt="FairRSFM benchmark and debiasing architecture" width="100%">
+</p>
 
-Remote sensing foundation models (RSFMs) are commonly evaluated using aggregate metrics, but a single dataset-level score can hide systematic performance disparities across ecological regions. **FairRSFM** is a biome-aware benchmark and debiasing framework for studying ecological group robustness in RSFMs.
-
-FairRSFM maps georeferenced samples from **14 terrestrial biome classes** into **six ecologically meaningful macro-groups** and evaluates models under a unified frozen-backbone probing protocol. The benchmark spans single-label classification, multi-label classification, crop-type segmentation, and dense land-cover segmentation.
-
-Using Prithvi-EO-2.0, SatMAE, and DOFA, the benchmark shows that strong aggregate transfer performance can mask substantial biome-dependent gaps. It also evaluates mitigation strategies that operate without updating the RSFM backbone.
+> **TL;DR:** Aggregate RSFM scores can hide large ecological performance gaps. FairRSFM assigns georeferenced samples to terrestrial biomes, consolidates them into six remote-sensing-relevant macro-groups, and evaluates frozen foundation models with worst-group, calibration, and parity metrics. It also benchmarks biome-aware mitigation through DBR, BOLP, and GroupDRO.
 
 ## News
 
 - **Coming soon:** FairRSFM paper on arXiv.
-- **Coming soon:** FairRSFM benchmark data on Hugging Face.
-- **Coming soon:** Training, preprocessing, and evaluation code.
+- **Coming soon:** FairRSFM benchmark metadata and dataset release on Hugging Face.
+- **Coming soon:** Preprocessing, training, debiasing, and evaluation code.
+- **Available now:** Project overview, protocol documentation, complete paper results, architecture, and biome figures.
 
-## Highlights
+## Overview
 
-- A biome-aware evaluation protocol for remote sensing foundation models.
-- A deterministic mapping from 14 terrestrial biomes to six ecological macro-groups.
-- Four downstream datasets spanning classification and semantic segmentation.
-- Three representative frozen RSFM backbones: Prithvi-EO-2.0, SatMAE, and DOFA.
-- Standard task metrics reported together with worst-group and cross-biome disparity measures.
-- Biome-Orthogonal Linear Probing (BOLP), a closed-form representation-level mitigation method with no backbone updates or additional trainable parameters.
-- Dynamic Biome Reweighting (DBR) and GroupDRO baselines for loss-level and group-robust comparison.
+Remote sensing foundation models (RSFMs) are normally compared using aggregate accuracy, macro-F1, or mIoU. These averages do not show whether a model transfers consistently across forests, grasslands, drylands, cryospheric regions, and water-influenced ecosystems.
+
+**FairRSFM** turns standard downstream transfer into an ecological group-robustness benchmark:
+
+1. Assign each georeferenced sample to one of **14 terrestrial biomes** using its patch centroid and an external ecoregion map.
+2. Consolidate sparse biome classes into **six ecologically meaningful macro-groups**.
+3. Evaluate **three frozen RSFM backbones** on **four classification and segmentation datasets**.
+4. Report standard task performance together with worst-group, calibration, and cross-group disparity metrics.
+5. Compare ERM with loss-level, representation-level, and group-robust mitigation strategies.
+
+### What FairRSFM contributes
+
+- A reusable biome-labeling and metadata protocol for georeferenced remote sensing datasets.
+- A two-level ecological taxonomy that preserves 14 raw biome labels while using six stable macro-groups for primary evaluation.
+- A controlled frozen-encoder benchmark spanning single-label classification, multi-label classification, and semantic segmentation.
+- **Dynamic Biome Reweighting (DBR)**, which adapts group weights from validation feedback.
+- **Biome-Orthogonal Linear Probing (BOLP)**, which removes dominant biome-associated directions from frozen embeddings without updating the backbone.
+- Complete reporting of task performance, worst-group robustness, calibration, equalized-odds disparity, and demographic-parity disparity.
+
+## Project At A Glance
+
+| Component | Scope |
+|---|---:|
+| Raw terrestrial biomes | 14 |
+| Ecological macro-groups | 6 |
+| Downstream datasets | 4 |
+| Frozen RSFM backbones | 3 |
+| Training strategies | 4 |
+| Independent random seeds | 3 |
 
 ## Benchmark
 
-### Downstream datasets
+### Downstream tasks
 
 | Dataset | Task | Classes | Train | Val | Test | Primary metric |
 |---|---|---:|---:|---:|---:|---|
-| m-EuroSAT | Single-label classification | 10 | 2,000 | 1,000 | 1,000 | Macro-F1 |
-| m-BigEarthNet | Multi-label classification | 43 | 20,000 | 1,000 | 1,000 | F1@opt |
-| m-SA-Crop-Type | Semantic segmentation | 10 | 3,000 | 1,000 | 1,000 | mIoU |
-| MMEarth20K | Dynamic World segmentation | 9 | 16,000 | 2,000 | 2,000 | mIoU |
+| m-EuroSAT | Single-label land-cover classification | 10 | 2,000 | 1,000 | 1,000 | Macro-F1 |
+| m-BigEarthNet | Multi-label land-cover classification | 43 | 20,000 | 1,000 | 1,000 | F1@opt |
+| m-SA-Crop-Type | Crop-type segmentation | 10 | 3,000 | 1,000 | 1,000 | mIoU |
+| MMEarth20K | Dynamic World land-cover segmentation | 9 | 16,000 | 2,000 | 2,000 | mIoU |
 
 ### Frozen foundation models
 
-| Backbone | Architecture | Parameters | Input bands | Encoder status |
-|---|---|---:|---|---|
-| Prithvi-EO-2.0 | Spatio-temporal ViT | 300M | 6 HLS bands | Frozen |
-| SatMAE | ViT-Large | 304M | 10 Sentinel-2 bands | Frozen |
-| DOFA | ViT-Base | 86M | 9-12 wavelength bands | Frozen |
+| Backbone | Architecture | Parameters | Embedding | Input configuration |
+|---|---|---:|---:|---|
+| Prithvi-EO-2.0 | Spatio-temporal ViT | 300M | 1024 | 6 HLS bands |
+| SatMAE | ViT-Large | 304M | 1024 | 10 Sentinel-2 bands |
+| DOFA | ViT-Base | 86M | 768 | 9-12 wavelength-conditioned bands |
 
-All experiments use 224 x 224 inputs and are evaluated over three independent random seeds. Only the task-specific classification head or lightweight segmentation decoder is trained.
+All encoders remain frozen. Only a classification probe or lightweight segmentation decoder is trained. Experiments use 224 x 224 inputs, AdamW with cosine scheduling, 50 epochs, validation-based checkpoint selection, and three random seeds.
 
-## Biome Groups
+See **[Benchmark and experimental protocol](docs/benchmark.md)** for full configuration details.
 
-FairRSFM first assigns each georeferenced sample to one of 14 raw terrestrial biomes. These labels are then consolidated into six macro-groups that reflect major spectral, phenological, hydrological, cryospheric, and surface-property regimes.
+## Biome-Aware Evaluation
 
-| ID | Macro-group | Included raw biome IDs | Remote sensing rationale |
+<p align="center">
+  <img src="assets/global-biome-macro-groups.png" alt="Global distribution of the six FairRSFM terrestrial biome macro-groups" width="100%">
+</p>
+
+| ID | Macro-group | Raw biome IDs | Dominant remote sensing regime |
 |---:|---|---|---|
-| 1 | Aseasonal High-Biomass | 1, 3, 5 | Dense vegetation with persistent canopy structure |
-| 2 | High-Amplitude Phenological | 2, 4, 6 | Forests with strong seasonal or phenological variation |
-| 3 | Transitional Herbaceous and Scrub | 7, 8, 12 | Heterogeneous grass, shrub, soil, and canopy mixtures |
-| 4 | Cryospheric and Short-Cycle | 10, 11 | Temperature-restricted ecosystems and short growing periods |
-| 5 | Xeric and Mineralogical | 13 | Vegetation-sparse surfaces dominated by albedo and mineral background |
-| 6 | Hydrologically Modulated | 9, 14 | Inundated ecosystems with water-driven spectral response |
+| 1 | Aseasonal High-Biomass | 1, 3, 5 | Persistent dense forest canopy |
+| 2 | High-Amplitude Phenological | 2, 4, 6 | Strong seasonal forest dynamics |
+| 3 | Transitional Herbaceous and Scrub | 7, 8, 12 | Mixed grass, shrub, soil, and canopy signals |
+| 4 | Cryospheric and Short-Cycle | 10, 11 | Temperature-limited and short growing cycles |
+| 5 | Xeric and Mineralogical | 13 | Sparse vegetation, exposed soil, and mineral background |
+| 6 | Hydrologically Modulated | 9, 14 | Water-driven spectral response and inundation |
 
-<div align="center">
-  <img src="assets/macro-group-distribution.png" alt="MMEarth20K distribution across the six biome macro-groups" width="95%">
+<p align="center">
+  <img src="assets/macro-group-distribution.png" alt="MMEarth20K distribution across the six biome macro-groups" width="90%">
   <br>
-  <sub>MMEarth20K sample distribution across the six macro-groups and the 80/10/10 train, validation, and test splits.</sub>
-</div>
+  <sub>MMEarth20K composition across macro-groups and the 80/10/10 train, validation, and test splits.</sub>
+</p>
 
-## Debiasing Framework
+See **[Biome taxonomy and labeling](docs/biome-groups.md)** for the complete 14-class mapping, rationales, metadata schema, and split counts.
 
-FairRSFM keeps the foundation-model encoder frozen and compares mitigation strategies at two stages of the downstream transfer pipeline.
+## Debiasing Methods
 
-### Dynamic Biome Reweighting
+| Method | Intervention | Description | Backbone updates | Extra trainable parameters |
+|---|---|---|---:|---:|
+| ERM | Baseline | Standard task loss on frozen RSFM features | No | No |
+| DBR | Loss level | Dynamically reweights below-mean biome groups using validation feedback | No | No |
+| BOLP | Representation level | Recenters group embeddings and projects out dominant biome-associated directions | No | No |
+| GroupDRO | Objective level | Optimizes group-robust performance across active biome groups | No | No |
 
-Dynamic Biome Reweighting (DBR) initializes inverse-frequency group weights and updates them from per-group validation performance. Groups performing below the current group mean receive greater weight at the next update.
+BOLP estimates the inter-group subspace from training embeddings, forms the orthogonal projector `P_k = I - U_k U_k^T`, and transforms each embedding as `z_hat = P_k(z - mu_g + mu_0)` before fitting the downstream head.
 
-### Biome-Orthogonal Linear Probing
+See **[Methods and evaluation metrics](docs/methods.md)** for the full DBR update rule, BOLP derivation, inference behavior, and metric definitions.
 
-Biome-Orthogonal Linear Probing (BOLP) acts directly on frozen embeddings:
+## Headline Results
 
-1. Compute an embedding centroid for each biome macro-group.
-2. Form the centered inter-group mean-difference matrix.
-3. Estimate its dominant directions with a thin singular value decomposition.
-4. Recenter each group and project embeddings onto the orthogonal complement of the biome-associated subspace.
-5. Train the downstream head on the transformed features.
+The table summarizes the mean performance over three seeds. `ERM O/W` denotes the original ERM overall and worst-group scores. The last two columns show the strongest overall and worst-group scores among all evaluated methods for each backbone and dataset.
 
-BOLP is closed-form, leaves the RSFM backbone unchanged, and adds no trainable parameters beyond the downstream head.
-
-[View the architecture figure](assets/fairrsfm-architecture.png)
-
-## Main Results
-
-The table below reports mean Prithvi-EO-2.0 performance over three seeds. Values are percentages. **Overall** is the standard task metric and **Worst** is the lowest score across the matched biome macro-groups.
-
-| Dataset | Method | Overall | Worst | NFR (lower is better) |
+| Backbone | Dataset | ERM O/W | Best overall | Best worst-group |
 |---|---|---:|---:|---:|
-| m-EuroSAT | ERM | 90.98 | 83.72 | 5.96 |
-|  | BOLP | 93.42 | 84.34 | 9.82 |
-|  | DBR | 91.36 | **84.35** | **5.85** |
-|  | GroupDRO | **94.14** | 84.34 | 10.34 |
-| m-BigEarthNet | ERM | 60.09 | 46.12 | 31.14 |
-|  | BOLP | **62.75** | **50.27** | 20.92 |
-|  | DBR | 58.05 | 48.04 | 29.43 |
-|  | GroupDRO | 54.42 | 46.82 | **19.19** |
-| m-SA-Crop-Type | ERM | 27.30 | 18.47 | 35.31 |
-|  | BOLP | **28.27** | 19.38 | 29.95 |
-|  | DBR | 27.18 | **19.81** | **28.45** |
-|  | GroupDRO | 28.26 | 19.09 | 39.63 |
-| MMEarth20K | ERM | **47.99** | 33.75 | 28.19 |
-|  | BOLP | 43.31 | 30.64 | 30.66 |
-|  | DBR | 47.84 | 34.76 | 26.42 |
-|  | GroupDRO | 46.99 | **37.16** | **15.34** |
+| Prithvi-EO-2.0 | m-EuroSAT | 90.98 / 83.72 | **94.14** (GroupDRO) | **84.35** (DBR) |
+|  | m-BigEarthNet | 60.09 / 46.12 | **62.75** (BOLP) | **50.27** (BOLP) |
+|  | m-SA-Crop-Type | 27.30 / 18.47 | **28.27** (BOLP) | **19.81** (DBR) |
+|  | MMEarth20K | 47.99 / 33.75 | **47.99** (ERM) | **37.16** (GroupDRO) |
+| SatMAE | m-EuroSAT | 93.89 / 74.45 | **93.89** (ERM) | **89.71** (GroupDRO) |
+|  | m-BigEarthNet | 53.30 / 41.33 | **53.30** (ERM) | **43.07** (BOLP) |
+|  | m-SA-Crop-Type | 28.01 / 18.07 | **28.79** (DBR) | **19.23** (DBR) |
+|  | MMEarth20K | 41.93 / 30.78 | **42.39** (DBR) | **32.74** (DBR) |
+| DOFA | m-EuroSAT | 89.63 / 79.88 | **90.98** (DBR) | **88.27** (DBR) |
+|  | m-BigEarthNet | 47.67 / 37.90 | **47.67** (ERM) | **38.74** (GroupDRO) |
+|  | m-SA-Crop-Type | 27.40 / 19.91 | **28.20** (DBR) | **21.91** (DBR) |
+|  | MMEarth20K | 39.67 / 27.64 | **39.67** (ERM) | **28.54** (DBR) |
 
-### Key observations
+### Main findings
 
-- On **m-EuroSAT**, BOLP improves worst-group performance from 83.72% to 84.34% while increasing overall macro-F1 from 90.98% to 93.42%.
-- On **m-BigEarthNet**, BOLP improves overall F1@opt from 60.09% to 62.75% and worst-group performance from 46.12% to 50.27%.
-- On **m-SA-Crop-Type**, BOLP and DBR improve the weakest ecological group, with DBR reaching 19.81% worst-group mIoU.
-- On **MMEarth20K**, mitigation is task dependent: GroupDRO produces the strongest worst-group mIoU, while BOLP removes representation directions that are also useful for dense prediction.
+- **Aggregate scores hide ecological gaps.** Prithvi-EO-2.0 reaches 60.09 F1@opt on m-BigEarthNet, but its worst biome group falls to 46.12.
+- **BOLP is particularly effective for Prithvi classification.** On m-BigEarthNet it improves overall F1@opt from 60.09 to 62.75, worst-group performance from 46.12 to 50.27, and NFR from 31.14 to 20.92.
+- **Group-robust optimization can recover large gaps.** SatMAE GroupDRO raises the m-EuroSAT worst-group score from 74.45 to 89.71.
+- **DBR is consistently useful across backbones.** It provides the best worst-group result for both segmentation tasks with SatMAE and DOFA.
+- **Mitigation is task dependent.** BOLP improves classification robustness but can remove biome variation that remains task-relevant for dense land-cover prediction.
 
-## Fairness and Robustness Metrics
+See **[Complete results](docs/results.md)** for every global metric, all mean and standard-deviation values, biome-wise classification and segmentation tables, interpretation, and limitations.
 
-FairRSFM reports standard task performance together with:
+## Evaluation Metrics
 
-- Worst-group score (`M_worst`)
-- Normalized performance range (`NFR`)
-- Cross-group standard deviation
-- Expected calibration error (`ECE`)
-- Equalized odds difference (`EOdd`)
-- Demographic parity measure (`DPM`)
+FairRSFM reports three complementary metric tiers:
 
-Unknown, water-only, or unmatched samples are excluded from the primary worst-group summaries unless stated otherwise. Metrics are computed over the matched macro-groups present in each dataset split.
+1. **Task performance:** Macro-F1, F1@opt, and mIoU.
+2. **Group robustness:** worst-group score and normalized failure range (NFR).
+3. **Calibration and parity:** expected calibration error (ECE), equalized-odds disparity (EOdd), and demographic-parity metric (DPM).
+
+Unknown, water-only, or unmatched samples are reported separately and excluded from primary worst-group summaries unless stated otherwise.
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [Benchmark protocol](docs/benchmark.md) | Datasets, sample counts, metadata, backbones, heads, and optimization |
+| [Biome taxonomy](docs/biome-groups.md) | 14 raw biomes, six macro-groups, rationales, labeling, and distributions |
+| [Methods and metrics](docs/methods.md) | DBR, BOLP, GroupDRO, task metrics, robustness, calibration, and parity |
+| [Complete results](docs/results.md) | All Prithvi, SatMAE, DOFA, and biome-wise results from the paper |
+
+## Release Status
+
+| Component | Status | Planned location |
+|---|---|---|
+| Project documentation and reported results | Available | This repository |
+| Paper | Coming soon | [arXiv placeholder](https://arxiv.org/abs/XXXX.XXXXX) |
+| Benchmark metadata and dataset | Coming soon | [Hugging Face placeholder](https://huggingface.co/datasets/aminurhossain/FairRSFM) |
+| Preprocessing and biome-labeling code | In preparation | This repository |
+| Training and mitigation code | In preparation | This repository |
+| Evaluation scripts and configs | In preparation | This repository |
 
 ## Repository Structure
 
 ```text
 FairRSFM/
 |-- README.md
-`-- assets/
-    |-- fairrsfm-architecture.png
-    `-- macro-group-distribution.png
+|-- assets/
+|   |-- fairrsfm-architecture.png
+|   |-- global-biome-macro-groups.png
+|   `-- macro-group-distribution.png
+`-- docs/
+    |-- benchmark.md
+    |-- biome-groups.md
+    |-- methods.md
+    `-- results.md
 ```
-
-The current repository snapshot contains the project overview, benchmark results, and figures. Training, preprocessing, and evaluation code will be added to the same repository.
-
-## Download
-
-- **Paper:** [arXiv release coming soon](https://arxiv.org/abs/XXXX.XXXXX)
-- **Dataset:** [Hugging Face release coming soon](https://huggingface.co/datasets/aminurhossain/FairRSFM)
-- **Code:** Training and evaluation code will be released in this repository.
 
 ## Citation
 
@@ -174,4 +208,4 @@ The citation will be updated with the final author list and arXiv identifier whe
 
 ## Acknowledgements
 
-FairRSFM builds on GEO-Bench, MMEarth, Dynamic World, the global terrestrial ecoregion taxonomy, and the official Prithvi-EO-2.0, SatMAE, and DOFA model releases.
+FairRSFM builds on GEO-Bench, MMEarth, Dynamic World, global terrestrial ecoregion products, and the official Prithvi-EO-2.0, SatMAE, and DOFA releases. We thank the maintainers of these datasets, models, and open-source tools.
