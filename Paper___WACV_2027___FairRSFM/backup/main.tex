@@ -1,0 +1,476 @@
+% WACV 2027 Paper Template
+% based on the ICCV 2025 template (https://media.eventhosts.cc/Conferences/ICCV2025/ICCV2025-Author-Kit-Feb.zip) with
+% WACV-specific details (e.g., 2 tracks) from the WACV 2025 template (https://www.dropbox.com/scl/fi/su44zgdhrzik26p2xu37k/WACV-2025-Author-Kit-Template.zip?rlkey=5qcfimjhxnmx3wlyk7yhk8wg7&dl=0)
+
+\documentclass[10pt,twocolumn,letterpaper]{article}
+
+%%%%%%%%% PAPER TYPE  - PLEASE UPDATE FOR FINAL VERSION
+\usepackage[review,algorithms]{wacv}      % To produce the REVIEW version for the algorithms track
+% \usepackage[review,applications]{wacv}      % To produce the REVIEW version for the applications track
+% \usepackage[review,datasets]{wacv}      % To produce the REVIEW version for the datasets track
+% \usepackage{wacv}              % To produce the CAMERA-READY version
+%\usepackage[pagenumbers]{wacv} % To force page numbers, e.g. for an arXiv version
+
+
+% Import additional packages in the preamble file, before hyperref
+\input{preamble}
+
+
+\usepackage{times} 
+\usepackage{epsfig} 
+\usepackage{graphicx} 
+\usepackage{amsmath} 
+\usepackage{amssymb} 
+\usepackage{booktabs} 
+\usepackage{multirow} 
+\usepackage{xspace} 
+\usepackage{enumitem} 
+\usepackage{pifont} 
+\usepackage{color} 
+\newcommand{\method}{\textsc{FairRSFM}\xspace} 
+
+
+% It is strongly recommended to use hyperref, especially for the review version.
+% hyperref with option pagebackref eases the reviewers' job.
+% Please disable hyperref *only* if you encounter grave issues, 
+% e.g. with the file validation for the camera-ready version.
+%
+% If you comment hyperref and then uncomment it, you should delete *.aux before re-running LaTeX.
+% (Or just hit 'q' on the first LaTeX run, let it finish, and you should be clear).
+\definecolor{wacvblue}{rgb}{0.21,0.49,0.74}
+\usepackage[pagebackref,breaklinks,colorlinks,allcolors=wacvblue]{hyperref}
+
+%%%%%%%%% PAPER ID  - PLEASE UPDATE
+\def\wacvPaperID{*****} % *** Enter the WACV Paper ID here
+\def\confName{WACV}
+\def\confYear{2027}
+
+
+%%%%%%%%% TITLE - PLEASE UPDATE
+\title{FairRSFM: A Benchmark and Debiasing Framework for Remote Sensing Foundation Models}
+
+%%%%%%%%% AUTHORS - PLEASE UPDATE
+\author{First Author\\
+Institution1\\
+Institution1 address\\
+{\tt\small firstauthor@i1.org}
+% For a paper whose authors are all at the same institution,
+% omit the following lines up until the closing ``}''.
+% Additional authors and addresses can be added with ``\and'',
+% just like the second author.
+% To save space, use either the email address or home page, not both
+\and
+Second Author\\
+Institution2\\
+First line of institution2 address\\
+{\tt\small secondauthor@i2.org}
+}
+
+\begin{document}
+\maketitle
+
+\input{sec/0_abstract}    
+
+
+% ---------------------------------------------------------------
+% 1. Introduction
+% ---------------------------------------------------------------
+\section{Introduction}
+
+Foundation models have recently become a dominant paradigm in remote sensing due to their ability to learn transferable representations from large-scale Earth observation data. Models pretrained on multispectral, synthetic aperture radar (SAR), optical, temporal, or multi-sensor imagery have shown strong performance across downstream tasks such as scene classification, semantic segmentation, land-cover mapping, object detection, and cross-modal retrieval. These advances suggest that remote sensing foundation models can serve as general-purpose backbones for diverse geospatial applications.
+
+Despite this progress, current evaluation protocols often rely on aggregate metrics such as overall accuracy, mean F1 score, or mean intersection-over-union. While useful, such metrics can hide systematic performance disparities. A model may achieve high average performance while failing on specific geographic regions, rare land-cover classes, low-resource sensors, low-resolution imagery, seasonal conditions, or visually challenging scene contexts. In real-world Earth observation, such hidden failures can affect applications related to agriculture, disaster response, urban monitoring, climate analysis, environmental assessment, and national-scale mapping.
+
+Bias in remote sensing differs from conventional bias in natural images. It can arise from uneven geographic coverage, unequal sensor availability, regional differences in land-cover distributions, seasonal acquisition patterns, cloud contamination, class imbalance, and resolution variation. For example, a foundation model pretrained mainly on data from certain continents may generalize poorly to tropical, arid, mountainous, or high-latitude regions. Similarly, a model trained predominantly on optical imagery may perform poorly under SAR or panchromatic settings. Therefore, remote sensing foundation models require a dedicated bias evaluation framework that reflects the unique properties of Earth observation data.
+
+Existing remote sensing benchmarks primarily focus on general transferability across tasks and datasets. However, systematic bias evaluation and mitigation for remote sensing foundation models remain underexplored. In particular, there is a need for a benchmark that explicitly defines bias dimensions, provides group-wise evaluation protocols, and measures not only average performance but also worst-group performance and disparity across under-represented conditions.
+
+To address this gap, we propose \method, a benchmark and debiasing framework for remote sensing foundation models. \method is designed around two goals. First, it provides a benchmark dataset and evaluation protocol for diagnosing multiple forms of bias in remote sensing foundation models. Second, it introduces a lightweight bias mitigation baseline that improves robustness on under-represented groups without requiring expensive full-model fine-tuning.
+
+Our contributions are summarized as follows:
+\begin{itemize}[leftmargin=*]
+    \item We introduce \method, a benchmark for systematic bias evaluation of remote sensing foundation models.
+    \item We define multiple bias dimensions relevant to Earth observation, including geographic, sensor, resolution, class-imbalance, seasonal, and scene-context bias.
+    \item We provide a unified evaluation protocol using group-wise performance, worst-group performance, disparity metrics, balanced accuracy, and tail-group robustness.
+    \item We propose a lightweight debiasing framework based on frozen foundation-model features, parameter-efficient adaptation, and group-aware optimization.
+    \item We evaluate representative remote sensing foundation models and demonstrate that aggregate metrics can hide substantial group-level performance disparities.
+\end{itemize}
+
+% ---------------------------------------------------------------
+% 2. Related Work
+% ---------------------------------------------------------------
+\section{Related Work}
+
+\subsection{Remote Sensing Foundation Models}
+
+Remote sensing foundation models aim to learn generalizable representations from large-scale Earth observation data. Recent methods have explored masked image modeling, contrastive learning, self-supervised learning, multimodal alignment, and temporal-spatial pretraining. These models have been applied to optical imagery, multispectral data, SAR, hyperspectral data, and multi-temporal satellite observations. Representative examples include SatMAE, Scale-MAE, CROMA, DOFA, Prithvi, SkySense, and other geospatial representation learning methods \cite{satmae,scalemae,croma,dofa,prithvi,skysense}. 
+
+While these models improve transfer performance across downstream tasks, their evaluation is commonly reported using average metrics. This leaves open the question of whether such models generalize uniformly across regions, sensors, resolutions, classes, seasons, and environmental conditions.
+
+\subsection{Remote Sensing Benchmarks}
+
+Several benchmarks have been proposed for evaluating remote sensing models across tasks and modalities. GeoBench-style benchmarks evaluate transfer learning across diverse Earth observation datasets, while newer benchmark suites consider broader task diversity, sensor variation, spatial resolution, and geographic coverage \cite{geobench,pangaea}. These benchmarks have been important for measuring generalization of remote sensing foundation models.
+
+However, most existing benchmarks are not explicitly designed for bias evaluation. They typically answer the question: ``Which model performs best on average?'' In contrast, \method asks: ``Where does a model fail, for whom does it fail, and under which remote sensing conditions does it fail?''
+
+\subsection{Bias and Fairness in Vision Models}
+
+Bias and fairness have been widely studied in computer vision, particularly in classification, recognition, and representation learning. Common fairness-aware evaluation protocols analyze group-wise accuracy, worst-group performance, subgroup disparity, class imbalance, and domain shift \cite{groupdro,fairnesssurvey}. Methods such as balanced sampling, reweighting, domain generalization, and group distributionally robust optimization have been used to improve performance on under-represented groups.
+
+Remote sensing introduces additional bias sources that are less common in natural image datasets. These include geographic under-representation, sensor-specific acquisition differences, spatial resolution variation, seasonal effects, cloud and atmospheric conditions, and long-tailed land-cover distributions. Therefore, fairness evaluation in remote sensing requires domain-specific benchmark design.
+
+\subsection{Bias Mitigation and Parameter-Efficient Adaptation}
+
+Bias mitigation methods often aim to improve worst-group or tail-group performance while preserving average accuracy. Common approaches include loss reweighting, balanced sampling, group-DRO, domain adversarial training, and representation regularization. Recently, parameter-efficient adaptation methods such as adapters and LoRA have become attractive for foundation models because they reduce computational cost and avoid full fine-tuning.
+
+In \method, we adopt a lightweight adaptation strategy. The foundation model backbone is frozen, and only a small bias-aware adaptation module is trained using group-aware optimization. This makes the proposed debiasing baseline practical for large remote sensing foundation models.
+
+% ---------------------------------------------------------------
+% 3. FairRSFM Benchmark
+% ---------------------------------------------------------------
+\section{\method Benchmark}
+
+\subsection{Benchmark Design Principles}
+
+The goal of \method is to provide a systematic benchmark for evaluating bias in remote sensing foundation models. Unlike standard benchmarks that focus mainly on average performance, \method is designed to expose performance variation across meaningful remote sensing groups.
+
+The benchmark follows four design principles:
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Bias-aware grouping:} each sample is associated with one or more metadata groups such as region, sensor, resolution, season, or scene type.
+    \item \textbf{Task diversity:} the benchmark supports multiple downstream tasks, including classification and segmentation. \todo{Add retrieval or detection if included.}
+    \item \textbf{Foundation-model evaluation:} models are evaluated under a unified protocol using frozen features, linear probing, fine-tuning, or parameter-efficient adaptation.
+    \item \textbf{Fairness-aware metrics:} evaluation includes group-wise and worst-group metrics in addition to overall accuracy.
+\end{enumerate}
+
+\subsection{Dataset Construction}
+
+\method is constructed from remote sensing datasets with diverse geographic coverage, sensor modalities, spatial resolutions, class distributions, and seasonal conditions. Each sample is associated with task labels and bias-relevant metadata.
+
+\todo{Add exact data sources here. Example: Sentinel-2, Sentinel-1, Landsat, aerial imagery, panchromatic/multispectral data, land-cover maps, or existing public datasets.}
+
+Table~\ref{tab:dataset_stats} summarizes the planned dataset statistics.
+
+\begin{table}[t]
+\centering
+\caption{Planned statistics of the \method benchmark. Replace the TODO entries with final numbers.}
+\label{tab:dataset_stats}
+\resizebox{\linewidth}{!}{
+\begin{tabular}{lcccc}
+\toprule
+Subset & Task & Sensor & \#Classes & \#Samples \\
+\midrule
+FairRSFM-Cls & Classification & TODO & TODO & TODO \\
+FairRSFM-Seg & Segmentation & TODO & TODO & TODO \\
+FairRSFM-Ret & Retrieval / Matching & TODO & TODO & TODO \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\subsection{Bias Dimensions}
+
+\method evaluates six major bias dimensions.
+
+\textbf{Geographic bias.}
+This measures whether model performance varies across continents, countries, eco-regions, climate zones, or latitude-longitude regions. Geographic bias is important because satellite data availability and land-cover distributions are often uneven across the globe.
+
+\textbf{Sensor bias.}
+This measures whether a model performs differently across optical, SAR, multispectral, hyperspectral, panchromatic, or multi-resolution sensors. A robust remote sensing foundation model should not overfit to a single sensing modality.
+
+\textbf{Resolution bias.}
+This measures whether performance changes across low-, medium-, and high-resolution imagery. Resolution bias is important because remote sensing applications often combine data from different satellite platforms.
+
+\textbf{Class-imbalance bias.}
+This measures whether models perform well on frequent land-cover classes but poorly on rare classes. This is especially relevant for long-tailed classes such as wetlands, snow, bare land, industrial areas, or minority crop types.
+
+\textbf{Seasonal or temporal bias.}
+This measures whether model performance changes across acquisition months, seasons, or temporal conditions. Seasonal bias can affect vegetation, snow cover, water bodies, agricultural fields, and urban appearance.
+
+\textbf{Scene-context bias.}
+This measures whether performance varies across contextual conditions such as urban, rural, coastal, forest, desert, mountainous, cloudy, or mixed land-cover scenes.
+
+\begin{table}[t]
+\centering
+\caption{Bias dimensions considered in \method.}
+\label{tab:bias_dimensions}
+\resizebox{\linewidth}{!}{
+\begin{tabular}{lll}
+\toprule
+Bias type & Group definition & Example metric \\
+\midrule
+Geographic & Region / country / biome & Worst-region Acc. \\
+Sensor & Optical / SAR / MS / PAN & Sensor gap \\
+Resolution & Low / medium / high & Resolution gap \\
+Class imbalance & Head / medium / tail classes & Tail F1 \\
+Temporal & Month / season & Seasonal gap \\
+Scene context & Urban / rural / forest / desert & Context gap \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\subsection{Task Definition}
+
+For classification, each sample is an image $x_i$ with a class label $y_i$ and group attribute $g_i$. The objective is to predict the correct class while maintaining consistent performance across groups.
+
+For segmentation, each sample contains an image $x_i$, a dense label map $Y_i$, and group attribute $g_i$. The objective is to produce accurate pixel-level predictions while avoiding poor performance on under-represented regions or scene types.
+
+For retrieval or image matching, each query image is matched against a gallery. The evaluation considers whether relevant images are retrieved consistently across groups. \todo{Keep this paragraph only if retrieval is part of the final benchmark.}
+
+\subsection{Evaluation Metrics}
+
+Let $\mathcal{G}$ denote the set of groups for a given bias dimension. Let $M_g$ be the performance of a model on group $g$. \method reports both average and fairness-aware metrics.
+
+\textbf{Overall performance.}
+For classification, we report accuracy, macro-F1, and balanced accuracy. For segmentation, we report mean intersection-over-union and mean F1. For retrieval, we report Recall@K, mAP@K, and F1@K.
+
+\textbf{Group-wise performance.}
+For each group $g \in \mathcal{G}$, we compute:
+\begin{equation}
+M_g = \frac{1}{|\mathcal{D}_g|} \sum_{(x_i,y_i)\in \mathcal{D}_g} m(f(x_i),y_i),
+\end{equation}
+where $\mathcal{D}_g$ is the subset belonging to group $g$ and $m(\cdot)$ is the task-specific metric.
+
+\textbf{Worst-group performance.}
+Worst-group performance is defined as:
+\begin{equation}
+M_{\text{worst}} = \min_{g \in \mathcal{G}} M_g.
+\end{equation}
+
+\textbf{Performance disparity.}
+The disparity across groups is defined as:
+\begin{equation}
+\Delta_{\mathcal{G}} = \max_{g \in \mathcal{G}} M_g - \min_{g \in \mathcal{G}} M_g.
+\end{equation}
+
+\textbf{Group-balanced performance.}
+We also report the average group performance:
+\begin{equation}
+M_{\text{group}} = \frac{1}{|\mathcal{G}|} \sum_{g \in \mathcal{G}} M_g.
+\end{equation}
+
+A fairer model should achieve high overall performance, high worst-group performance, and low disparity.
+
+% ---------------------------------------------------------------
+% 4. Debiasing Framework
+% ---------------------------------------------------------------
+\section{Bias-Aware Debiasing Framework}
+
+\subsection{Overview}
+
+To demonstrate that \method is actionable, we propose a lightweight debiasing baseline for remote sensing foundation models. The framework uses a frozen pretrained backbone and trains only a small adaptation module. This reduces computational cost while allowing the model to improve performance on under-represented groups.
+
+Given an input image $x$, a frozen foundation model $F_{\theta}$ extracts a representation:
+\begin{equation}
+z = F_{\theta}(x).
+\end{equation}
+A trainable adaptation module $A_{\phi}$ and prediction head $h_{\psi}$ produce the final prediction:
+\begin{equation}
+\hat{y} = h_{\psi}(A_{\phi}(z)).
+\end{equation}
+Here, $F_{\theta}$ is frozen, while $A_{\phi}$ and $h_{\psi}$ are optimized using group-aware objectives.
+
+\subsection{Parameter-Efficient Bias-Aware Adaptation}
+
+The adaptation module can be implemented using a lightweight MLP, adapter block, or LoRA-style module. This design is suitable for large remote sensing foundation models because it avoids full fine-tuning and reduces overfitting on small bias groups.
+
+The standard task loss is:
+\begin{equation}
+\mathcal{L}_{\text{task}} =
+\frac{1}{B}\sum_{i=1}^{B}
+\ell(\hat{y}_i,y_i),
+\end{equation}
+where $B$ is the batch size and $\ell$ is the task-specific loss.
+
+\subsection{Group-Aware Optimization}
+
+To improve under-represented groups, we compute group-specific losses:
+\begin{equation}
+\mathcal{L}_{g} =
+\frac{1}{|\mathcal{B}_g|}
+\sum_{i \in \mathcal{B}_g}
+\ell(\hat{y}_i,y_i),
+\end{equation}
+where $\mathcal{B}_g$ is the set of samples from group $g$ in the mini-batch.
+
+A group-balanced loss is defined as:
+\begin{equation}
+\mathcal{L}_{\text{bal}} =
+\sum_{g \in \mathcal{G}}
+\alpha_g \mathcal{L}_g,
+\end{equation}
+where $\alpha_g$ is a group weight. We define:
+\begin{equation}
+\alpha_g = \frac{(n_g+\epsilon)^{-\gamma}}
+{\sum_{g' \in \mathcal{G}}(n_{g'}+\epsilon)^{-\gamma}},
+\end{equation}
+where $n_g$ is the number of training samples in group $g$, $\epsilon$ is a small constant, and $\gamma$ controls the strength of reweighting.
+
+To improve worst-group robustness, we also use a soft worst-group loss:
+\begin{equation}
+\mathcal{L}_{\text{wg}} =
+\sum_{g \in \mathcal{G}}
+\frac{\exp(\tau \mathcal{L}_g)}
+{\sum_{g'} \exp(\tau \mathcal{L}_{g'})}
+\mathcal{L}_g,
+\end{equation}
+where $\tau$ controls the emphasis on high-loss groups.
+
+The final training objective is:
+\begin{equation}
+\mathcal{L} =
+\mathcal{L}_{\text{task}}
++ \lambda_{\text{bal}}\mathcal{L}_{\text{bal}}
++ \lambda_{\text{wg}}\mathcal{L}_{\text{wg}}.
+\end{equation}
+
+\subsection{Training Strategy}
+
+During training, the foundation-model backbone remains frozen. Only the adapter and task head are updated. We use group-aware mini-batch sampling to ensure that under-represented groups appear sufficiently during optimization. At inference time, no group label is required; the model uses only the input image.
+
+% ---------------------------------------------------------------
+% 5. Experiments
+% ---------------------------------------------------------------
+\section{Experiments}
+
+\subsection{Experimental Setup}
+
+We evaluate \method using multiple remote sensing foundation models under a unified protocol. Each model is evaluated on the same train/validation/test splits and the same group definitions.
+
+\todo{Add final datasets, number of samples, input resolution, train/val/test split, and tasks.}
+
+We consider three evaluation settings:
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Linear probing:} the pretrained backbone is frozen and only a linear classifier is trained.
+    \item \textbf{Parameter-efficient tuning:} the backbone is frozen and lightweight adapters are trained.
+    \item \textbf{Fine-tuning:} the full model or selected layers are updated. \todo{Use only if you perform fine-tuning.}
+\end{itemize}
+
+\subsection{Evaluated Foundation Models}
+
+We compare representative remote sensing foundation models and general vision foundation models adapted to remote sensing. Candidate models include SatMAE, Scale-MAE, CROMA, DOFA, Prithvi, SkySense, DINOv2, MAE, and CLIP-style baselines. \todo{Keep only the models actually evaluated.}
+
+\begin{table*}[t]
+\centering
+\caption{Comparison of \method with existing remote sensing benchmarks. \method is designed specifically for bias-aware evaluation and mitigation.}
+\label{tab:benchmark_comparison}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{lcccccc}
+\toprule
+Benchmark & RS foundation models & Multi-task & Multi-sensor & Geographic groups & Bias metrics & Debiasing baseline \\
+\midrule
+GeoBench & \checkmark & \checkmark & \checkmark & Partial & -- & -- \\
+PANGAEA & \checkmark & \checkmark & \checkmark & \checkmark & Partial & -- \\
+Other RS benchmarks & \checkmark & Partial & Partial & -- & -- & -- \\
+\method & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark \\
+\bottomrule
+\end{tabular}}
+\end{table*}
+
+\subsection{Bias Evaluation Results}
+
+Table~\ref{tab:bias_results} reports model performance across average and group-wise metrics. We observe that models with strong overall performance may still show low worst-group performance and high disparity. This confirms that aggregate metrics alone are insufficient for evaluating remote sensing foundation models.
+
+\begin{table*}[t]
+\centering
+\caption{Bias evaluation of representative foundation models on \method. Replace TODO values with experimental results. Higher is better for Acc., F1, and worst-group performance; lower is better for disparity.}
+\label{tab:bias_results}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{lcccccc}
+\toprule
+Model & Overall Acc. & Macro-F1 & Group Avg. & Worst Group & Disparity $\downarrow$ & Tail F1 \\
+\midrule
+MAE & TODO & TODO & TODO & TODO & TODO & TODO \\
+SatMAE & TODO & TODO & TODO & TODO & TODO & TODO \\
+Scale-MAE & TODO & TODO & TODO & TODO & TODO & TODO \\
+CROMA & TODO & TODO & TODO & TODO & TODO & TODO \\
+DOFA & TODO & TODO & TODO & TODO & TODO & TODO \\
+Prithvi & TODO & TODO & TODO & TODO & TODO & TODO \\
+SkySense & TODO & TODO & TODO & TODO & TODO & TODO \\
+\bottomrule
+\end{tabular}}
+\end{table*}
+
+\subsection{Debiasing Results}
+
+Table~\ref{tab:debias_results} compares standard training with the proposed bias-aware adaptation framework. The goal is not only to improve average performance but also to improve worst-group performance and reduce disparity.
+
+\begin{table}[t]
+\centering
+\caption{Effect of the proposed debiasing framework.}
+\label{tab:debias_results}
+\resizebox{\linewidth}{!}{
+\begin{tabular}{lcccc}
+\toprule
+Method & Overall & Worst Group & Disparity $\downarrow$ & Tail F1 \\
+\midrule
+Linear probing & TODO & TODO & TODO & TODO \\
+Adapter tuning & TODO & TODO & TODO & TODO \\
+Balanced sampling & TODO & TODO & TODO & TODO \\
+Group-aware loss & TODO & TODO & TODO & TODO \\
+Proposed debiasing & TODO & TODO & TODO & TODO \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\subsection{Ablation Study}
+
+We analyze the contribution of each component in the proposed debiasing framework. Table~\ref{tab:ablation} shows the effect of removing group-aware sampling, group-balanced loss, and worst-group loss.
+
+\begin{table}[t]
+\centering
+\caption{Ablation study of the debiasing framework.}
+\label{tab:ablation}
+\resizebox{\linewidth}{!}{
+\begin{tabular}{lcccc}
+\toprule
+Variant & Overall & Worst Group & Disparity $\downarrow$ & Tail F1 \\
+\midrule
+Full method & TODO & TODO & TODO & TODO \\
+w/o balanced sampling & TODO & TODO & TODO & TODO \\
+w/o group-balanced loss & TODO & TODO & TODO & TODO \\
+w/o worst-group loss & TODO & TODO & TODO & TODO \\
+w/o adapter tuning & TODO & TODO & TODO & TODO \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\subsection{Qualitative Analysis}
+
+Figure~\ref{fig:qualitative} shows qualitative examples where foundation models fail under specific bias conditions. These examples include under-represented regions, rare classes, challenging seasons, sensor changes, and mixed scene contexts. After debiasing, the model improves prediction consistency on difficult groups.
+
+\begin{figure}[t]
+\centering
+\fbox{
+\begin{minipage}[c][0.22\textheight][c]{0.95\linewidth}
+\centering
+Placeholder for qualitative examples.\\
+Add images showing failure and improvement after debiasing.
+\end{minipage}}
+\caption{Qualitative examples from \method. The benchmark reveals group-specific failures that are hidden by aggregate metrics.}
+\label{fig:qualitative}
+\end{figure}
+
+% ---------------------------------------------------------------
+% 6. Discussion and Limitations
+% ---------------------------------------------------------------
+\section{Discussion and Limitations}
+
+\method shows that remote sensing foundation models should not be evaluated only by aggregate accuracy. Group-wise evaluation provides a more complete understanding of model reliability across heterogeneous Earth observation conditions. The proposed debiasing framework improves worst-group performance while maintaining competitive overall accuracy, suggesting that lightweight adaptation can be an effective strategy for bias mitigation.
+
+However, \method also has limitations. First, bias group definitions depend on the availability and quality of metadata. Second, fairness in remote sensing is task-dependent, and no single metric can capture all possible forms of bias. Third, some geographic or environmental groups may still be under-represented due to limitations in public datasets. Finally, the proposed debiasing method is intended as a strong baseline rather than a complete solution to all bias problems in remote sensing foundation models.
+
+% ---------------------------------------------------------------
+% 7. Conclusion
+% ---------------------------------------------------------------
+\section{Conclusion}
+
+We presented \method, a benchmark and debiasing framework for remote sensing foundation models. The benchmark enables systematic evaluation of geographic, sensor, resolution, class-imbalance, temporal, and scene-context bias. By reporting group-wise performance, worst-group accuracy, disparity, and balanced metrics, \method reveals hidden model failures that are not visible from aggregate performance alone. We further introduced a lightweight bias-aware adaptation baseline that improves under-represented group performance while preserving overall accuracy. We hope \method will support the development of fairer, more reliable, and more trustworthy remote sensing foundation models.
+
+
+{
+    \small
+    \bibliographystyle{ieeenat_fullname}
+    \bibliography{main}
+}
+
+
+\end{document}

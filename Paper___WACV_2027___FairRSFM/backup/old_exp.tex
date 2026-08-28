@@ -1,0 +1,171 @@
+
+\section{Experiments}
+
+\subsection{Experimental Protocol}
+The current implemented model is Prithvi-EO-2.0 300M TL. The backbone is frozen and only the decoder/head is trained. Additional candidate RSFMs to be evaluated under the same protocol are SatMAE++, SoftCon, DOFA, and SpectralGPT.
+
+\begin{table}[t]
+\centering
+\caption{Prithvi-EO-2.0 linear-probing setup used in the current experiments.}
+\label{tab:training_config}
+\resizebox{\linewidth}{!}{
+\begin{tabular}{l l}
+\toprule
+Parameter & Value \\
+\midrule
+Backbone & Prithvi-EO-2.0 300M TL \\
+Trainable part & MLP decoder/head only \\
+Frozen parameters & Encoder backbone \\
+Bands & Blue, Green, Red, NIR Narrow, SWIR1, SWIR2 \\
+Input size & $224\times224$ \\
+Batch size & 128 \\
+Optimizer & AdamW \\
+Learning rate & $1\times10^{-3}$ with cosine annealing \\
+Weight decay & $1\times10^{-4}$ \\
+Precision & BF16 mixed precision \\
+Early stopping & Patience = 15 epochs \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\subsection{Current Global Results}
+Table~\ref{tab:global_results} summarizes the current Prithvi-EO-2.0 results. The key observation is that strong global performance can coexist with large biome-wise disparity.
+
+\begin{table}[t]
+\centering
+\caption{Global test performance of Prithvi-EO-2.0 linear probing. Values without completed experiments are placeholders.}
+\label{tab:global_results}
+\resizebox{\linewidth}{!}{
+\begin{tabular}{l l l c c}
+\toprule
+Dataset & Task & Training & Metric & Value \\
+\midrule
+m-EuroSAT & Classification & Original & Macro-F1 & 0.936 \\
+m-BigEarthNet & Multi-label cls. & Original & Macro-F1 & 0.626 \\
+m-BigEarthNet & Multi-label cls. & Balanced & Macro-F1 & 0.424 \\
+m-SA-Crop-Type & Segmentation & Original & Global mIoU & 0.2929 \\
+m-SA-Crop-Type & Segmentation & Original & Pixel Acc. & 0.6512 \\
+m-So2Sat & Classification & Original & Macro-F1 & \redtodo{TBD} \\
+m-Cashew-Plantation & Segmentation & Original & mIoU & \redtodo{TBD} \\
+Sen1Floods11 & Segmentation & Original & mIoU/F1 & \redtodo{TBD} \\
+Multi-Crop-Seg. & Segmentation & Original & mIoU & \redtodo{TBD} \\
+MMEarth100K & Segmentation & Original & mIoU & \redtodo{TBD} \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\subsection{Per-Biome Results: Classification}
+Table~\ref{tab:per_biome_classification} reports current per-biome results for m-EuroSAT and m-BigEarthNet. For m-EuroSAT, the model performs strongly on dominant temperate and Mediterranean biomes but drops on Boreal Forests/Taiga and Temperate Conifer Forests. For m-BigEarthNet, the Mediterranean biome has the lowest F1@opt under original training.
+
+\begin{table*}[t]
+\centering
+\caption{Current per-biome classification results for Prithvi-EO-2.0 linear probing. F1@opt denotes macro-F1 at per-class optimal thresholds for the multi-label m-BigEarthNet task. A dash indicates that the experiment has not yet been run.}
+\label{tab:per_biome_classification}
+\resizebox{0.8\textwidth}{!}{
+\begin{tabular}{l l c c c}
+\toprule
+Dataset & Biome & Test $N$ & Original & Balanced \\
+\midrule
+\multirow{6}{*}{m-EuroSAT Macro-F1}
+& Temperate Broadleaf \& Mixed Forests & 706 & 0.955 & -- \\
+& Mediterranean Forests, Woodlands \& Scrub & 231 & 0.948 & -- \\
+& Boreal Forests/Taiga & 18 & 0.800 & -- \\
+& Temperate Conifer Forests & 25 & 0.818 & -- \\
+& Temperate Grasslands, Savannas \& Shrublands & 8 & 1.000 & -- \\
+& Unknown / water & 12 & 0.871 & -- \\
+\midrule
+\multirow{5}{*}{m-BigEarthNet F1@opt}
+& Temperate Broadleaf \& Mixed Forests & 403 & 0.621 & 0.453 \\
+& Mediterranean Forests, Woodlands \& Scrub & 336 & 0.492 & 0.402 \\
+& Boreal Forests/Taiga & 132 & 0.668 & 0.525 \\
+& Temperate Conifer Forests & 14 & 0.625 & 0.605 \\
+& Unknown / water & 115 & 0.551 & -- \\
+\bottomrule
+\end{tabular}}
+\end{table*}
+
+\subsection{Per-Biome Results: Segmentation}
+Table~\ref{tab:per_biome_segmentation} reports current segmentation results for m-SA-Crop-Type. Performance is substantially lower in Deserts and Xeric Shrublands than in Mediterranean Forests, Woodlands and Scrub.
+
+\begin{table}[t]
+\centering
+\caption{Current per-biome segmentation results for Prithvi-EO-2.0 on m-SA-Crop-Type.}
+\label{tab:per_biome_segmentation}
+\resizebox{\linewidth}{!}{
+\begin{tabular}{l c c}
+\toprule
+Biome & Test $N$ & mIoU \\
+\midrule
+Deserts \& Xeric Shrublands & 124 & 0.1755 \\
+Mediterranean Forests, Woodlands \& Scrub & 875 & 0.2891 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\subsection{Fairness Metrics Across Biomes}
+Table~\ref{tab:fairness_summary} summarizes biome fairness metrics. Lower NFR, standard deviation, EOdd, and DPM indicate more consistent behavior across biomes. The balanced m-BigEarthNet run reduces neither the worst-biome metric nor the NFR, suggesting that naive biome balancing is not sufficient.
+
+\begin{table*}[t]
+\centering
+\caption{Current biome fairness summary for Prithvi-EO-2.0 linear probing. Worst-metric is worst-biome macro-F1 for classification and worst-biome mIoU for segmentation.}
+\label{tab:fairness_summary}
+\resizebox{0.9\textwidth}{!}{
+\begin{tabular}{l l c c c c c}
+\toprule
+Dataset & Training & Worst-metric & NFR $\downarrow$ & Std. dev. $\downarrow$ & EOdd $\downarrow$ & DPM $\downarrow$ \\
+\midrule
+m-EuroSAT & Original & 0.800 & 0.2212 & 0.080 & 0.247 & 0.234 \\
+m-BigEarthNet & Original & 0.492 & 0.338 & 0.077 & 0.429 & 0.168 \\
+m-BigEarthNet & Balanced & 0.402 & 0.463 & 0.079 & 0.407 & 0.166 \\
+m-SA-Crop-Type & Original & 0.1755 & 0.4891 & 0.0568 & -- & -- \\
+m-So2Sat & Original & \redtodo{TBD} & \redtodo{TBD} & \redtodo{TBD} & \redtodo{TBD} & \redtodo{TBD} \\
+m-Cashew-Plantation & Original & \redtodo{TBD} & \redtodo{TBD} & \redtodo{TBD} & -- & -- \\
+\bottomrule
+\end{tabular}}
+\end{table*}
+
+\subsection{Biome Distribution in m-BigEarthNet}
+The current m-BigEarthNet split is highly imbalanced across biomes. Temperate Broadleaf and Mixed Forests and Mediterranean regions dominate the original test split, while Temperate Conifer Forests contain only 1.4\% of test samples. Table~\ref{tab:ben_distribution} shows the current distribution.
+
+\begin{table}[t]
+\centering
+\caption{Biome distribution in the current m-BigEarthNet preprocessing.}
+\label{tab:ben_distribution}
+\resizebox{\linewidth}{!}{
+\begin{tabular}{l c c c c}
+\toprule
+Biome & Train bal. & Val orig. & Val bal. & Test orig. \\
+\midrule
+Boreal Forests/Taiga & 356 & 139 & 17 & 132 \\
+Mediterranean & 356 & 335 & 17 & 336 \\
+Temp. Broadleaf \& Mixed & 356 & 379 & 17 & 403 \\
+Temp. Conifer & 356 & 17 & 17 & 14 \\
+Unknown & -- & 130 & -- & 115 \\
+\midrule
+Total & 1424 & 1000 & 68 & 1000 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\subsection{Planned Full Model Benchmark}
+Table~\ref{tab:model_placeholder} gives the final model-comparison format. Current results are available for Prithvi-EO-2.0; other RSFMs will be filled after running the unified linear-probing pipeline.
+
+\begin{table*}[t]
+\centering
+\caption{Planned full RSFM comparison on \method. Fill the placeholders after running the unified protocol.}
+\label{tab:model_placeholder}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{l ccc ccc}
+\toprule
+\multirow{2}{*}{Model} & \multicolumn{3}{c}{Classification Avg. / Worst / NFR} & \multicolumn{3}{c}{Segmentation Avg. / Worst / NFR} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+& Avg. & Worst & NFR $\downarrow$ & Avg. & Worst & NFR $\downarrow$ \\
+\midrule
+Prithvi-EO-2.0 & \redtodo{aggregate} & \redtodo{aggregate} & \redtodo{aggregate} & \redtodo{aggregate} & \redtodo{aggregate} & \redtodo{aggregate} \\
+SatMAE++ & \redtodo{TBD} & \redtodo{TBD} & \redtodo{TBD} & \redtodo{TBD} & \redtodo{TBD} & \redtodo{TBD} \\
+SoftCon & \redtodo{TBD} & \redtodo{TBD} & \redtodo{TBD} & \redtodo{TBD} & \redtodo{TBD} & \redtodo{TBD} \\
+DOFA & \redtodo{TBD} & \redtodo{TBD} & \redtodo{TBD} & \redtodo{TBD} & \redtodo{TBD} & \redtodo{TBD} \\
+SpectralGPT & \redtodo{TBD} & \redtodo{TBD} & \redtodo{TBD} & \redtodo{TBD} & \redtodo{TBD} & \redtodo{TBD} \\
+\bottomrule
+\end{tabular}}
+\end{table*}

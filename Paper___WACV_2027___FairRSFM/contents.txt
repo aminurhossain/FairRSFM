@@ -1,0 +1,111 @@
+\section{Introduction}
+
+\section{Related Work}
+\subsection{Remote Sensing Foundation Models}
+\subsection{Remote Sensing Benchmarks}
+\subsection{Fairness, Group Robustness, and Representation Debiasing}
+
+\section{FairRSFM Benchmark}
+\subsection{Task Families and Datasets}
+\subsection{Biome Label Construction}
+\subsection{Biome Metadata Schema}
+\subsection{Evaluation Metrics}
+
+\section{Biome-Aware Debiasing Framework}
+\subsection{Biome-Balanced ERM}
+\subsection{Biome-Reweighted ERM}
+\subsection{Dynamic Biome Reweighting with Validation Feedback}
+\subsection{Biome-Orthogonal Linear Probing}
+\subsection{Method Comparison}
+
+\section{Experiments}
+\subsection{Experimental Protocol}
+\subsection{Implementation Details}
+\subsection{Biome Distribution Analysis}
+\subsection{Global Performance}
+\subsection{Biome-Wise Performance}
+\subsection{Fairness and Robustness Analysis}
+\subsection{Debiasing Results}
+\subsection{Ablation Study}
+
+\section{Discussion}
+
+\section{Limitations}
+
+\section{Conclusion}
+
+
+
+Info for biome grouping:
+
+
+Non-Temporal Optical Macro-Classes
+�� 01. Dense Forest Canopies (Saturated Biomass)
+
+Includes: 01 (Tropical Moist), 02 (Tropical Dry), 03 (Tropical Conifer), 04 (Temperate Broadleaf), 05 (Temperate Conifer), 06 (Boreal/Taiga).
+
+The Logic: In a single image, these all present as contiguous, high-texture blocks of vegetation. Your sensor will register maximum NIR [Near-Infrared: the portion of the electromagnetic spectrum strongly reflected by healthy cellular plant structure] and near-zero background soil. You cannot separate them without knowing the latitude or the time of year.
+
+�� 02. Mixed Woodlands & Scrub (Sub-pixel Heterogeneity)
+
+Includes: 07 (Tropical Savannas), 12 (Mediterranean Scrub).
+
+The Logic: These areas suffer from massive sub-pixel mixing [Sub-pixel mixing: when a single pixel contains multiple different physical materials, confusing the spectral signal]. The sensor sees a chaotic blend of tree canopies, bare earth, and dry grass in the exact same frame. Expect high variance in your SWIR [Short-Wave Infrared: the region of the electromagnetic spectrum highly sensitive to moisture content and bare soil] bands.
+
+�� 03. Open Herbaceous (High Albedo Vegetation)
+
+Includes: 08 (Temperate Grasslands), 10 (Montane Grasslands).
+
+The Logic: Lacking a complex 3D canopy, these biomes reflect significantly more visible light. The lack of shadowing from tall trees creates a much smoother, brighter texture in the spatial domain [Spatial domain: the representation of an image based on the physical arrangement of its pixels].
+
+�� 04. Saturated & Inundated (Infrared Absorption)
+
+Includes: 09 (Flooded Grasslands), 14 (Mangroves).
+
+The Logic: Water is the dominant driver here. Because water absorbs almost all infrared energy, these biomes will present with artificially low NDVI [Normalized Difference Vegetation Index: a mathematical combination of red and NIR bands used to quantify vegetation greenness] despite being lush. Your model will have to rely on the sudden drop in reflectance to separate them from dry vegetation.
+
+��️ 05. Barren & Cryospheric (Geological Dominance)
+
+Includes: 11 (Tundra), 13 (Deserts & Xeric Shrublands).
+
+The Logic: Vegetation is statistically insignificant here. You are no longer classifying plants; you are classifying soil mineralogy [Mineralogy: the scientific study of the chemistry, crystal structure, and physical properties of minerals] and surface rock. The signal is entirely driven by surface albedo [Albedo: the measure of the diffuse reflection of solar radiation out of the total solar radiation hitting a surface].
+
+
+%% Sub group of 6 
+
+The 6-Class RSFM Latent Grouping & Architectural Rationale
+�� 01. Aseasonal High-Biomass
+
+Biomes Included: 01 (Tropical Moist Broadleaf), 03 (Tropical Conifer), 05 (Temperate Conifer).
+
+The "Why" (Physics & AI Logic): These ecosystems present a permanently saturated LAI [Leaf Area Index: a mathematical ratio of total upper leaf surface area divided by the surface area of the land]. Because there is negligible temporal variance [Temporal variance: the measurable change in a data point across a time-series sequence], a foundation model encodes these regions as a flat, high-amplitude signal. The model does not need to analyze a time-series to know it is looking at a dense forest; it relies purely on static Red Edge bands [Red Edge bands: specific narrow wavelengths highly sensitive to exact chlorophyll concentration] to map them into the same region of the latent space [Latent space: the compressed, multidimensional mathematical representation where the AI maps similar inputs].
+
+�� 02. High-Amplitude Phenological
+
+Biomes Included: 02 (Tropical Dry Broadleaf), 04 (Temperate Broadleaf), 06 (Boreal/Taiga).
+
+The "Why" (Physics & AI Logic): These are defined by massive, cyclic physical transformations. An RSFM [RSFM: Remote Sensing Foundation Model, an AI pre-trained on vast satellite data] tracks the harmonic variance [Harmonic variance: repeating, predictable mathematical shifts over a period, like a sine wave] of these pixels. Boreal/Taiga is grouped here instead of with Tundra because the mathematical delta [Delta: the observable difference or change between two states] of shifting from a snow-covered winter canopy to a green summer canopy triggers the exact same temporal attention mechanisms [Attention mechanisms: neural network components that weigh the importance of different data points over time] as a deciduous forest shedding and regrowing its leaves.
+
+�� 03. Transitional Herbaceous & Scrub
+
+Biomes Included: 07 (Tropical Savannas), 08 (Temperate Grasslands), 12 (Mediterranean Scrub).
+
+The "Why" (Physics & AI Logic): These are precipitation-coupled environments [Precipitation-coupled environments: ecosystems where the vegetation state is driven immediately by rain events rather than strict solar seasons]. To the sensor, they present extreme sub-pixel heterogeneity [Sub-pixel heterogeneity: a condition where a single pixel contains conflicting spectral information from mixed materials like soil, grass, and shadow]. The model groups these together because it must constantly process erratic spikes in the SWIR [Short-Wave Infrared: the region of the electromagnetic spectrum highly sensitive to moisture and bare soil] bands as the ground rapidly alternates between dry dirt and wet vegetation.
+
+��️ 04. Cryospheric & Short-Cycle
+
+Biomes Included: 10 (Montane Grasslands), 11 (Tundra).
+
+The "Why" (Physics & AI Logic): These regions are strictly temperature-restricted. The AI groups them because their temporal curve is defined by prolonged cryospheric dormancy [Cryospheric dormancy: a state where biological and spectral activity is masked by frozen water or permafrost]. The foundation model recognizes a highly compressed, violent green-up window that lasts only weeks, rather than months, mapping these pixels far away from standard grasslands in the embedding space.
+
+��️ 05. Xeric & Mineralogical
+
+Biomes Included: 13 (Deserts & Xeric Shrublands).
+
+The "Why" (Physics & AI Logic): Vegetation is a statistical anomaly here. Because the NDVI [Normalized Difference Vegetation Index: a standard mathematical calculation used to quantify vegetation greenness] is effectively zero year-round, the model drops all biological feature extraction. Instead, the model's weights shift entirely to calculating surface albedo [Albedo: the measurement of solar radiation reflected by a surface] and soil mineralogy [Mineralogy: the spectral signature of specific chemical crystal structures in rocks and sand]. It isolates this class because the mathematical rules for processing it share nothing with the other five groups.
+
+�� 06. Hydrologically Modulated
+
+Biomes Included: 09 (Flooded Grasslands), 14 (Mangroves).
+
+The "Why" (Physics & AI Logic): Liquid water fundamentally breaks standard vegetation indices by causing severe infrared absorption [Infrared absorption: the physical process where water molecules consume near-infrared energy, causing the area to appear black to the sensor]. The RSFM uses specific channel grouping [Channel grouping: an architectural design that processes different spectral bands in isolated clusters] to mathematically separate the high-greenness signal of the plant leaves from the zero-reflectance signal of the water beneath them

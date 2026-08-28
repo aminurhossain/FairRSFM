@@ -1,0 +1,1041 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=0.5in]{geometry}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{graphicx}
+
+\begin{document}
+
+% ============================================================
+% PRITHVI-2.0 MODEL TABLES
+% ============================================================
+
+\section*{Prithvi-2.0}
+
+% ------------------------------------------------------------
+% Table 1: Main Results (Prithvi)
+% ------------------------------------------------------------
+
+\begin{table*}[h!]
+\centering
+\caption{Prithvi-2.0: Results across datasets and methods.}
+\label{tab:results_prithvi}
+
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.1}
+
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lllcccccccccccc}
+\toprule
+\textbf{Dataset} &
+\textbf{Method} &
+\textbf{Seed} &
+\textbf{Epoch} &
+\textbf{Val MF1} &
+\textbf{Test MF1} &
+\textbf{Micro Score} &
+\textbf{$M_{\text{worst}}$} &
+\textbf{PER $\uparrow$} &
+\textbf{Gini $\downarrow$} &
+\textbf{ECE $\downarrow$} &
+\textbf{NFR $\downarrow$} &
+\textbf{Std $\downarrow$} &
+\textbf{EOdd $\downarrow$} &
+\textbf{DPM $\downarrow$} \\
+\midrule
+
+% m-EuroSAT
+m-EuroSAT & Original ERM & seed\_0 & 49 & 96.78 & 93.94 & 93.83 & 82.68 & -- & -- & 1.68 & 12.37 & 4.62 & 19.37 & 10.45 \\
+m-EuroSAT & Original ERM & seed\_1 & 47 & 95.06 & 94.09 & 94.03 & 84.34 & -- & -- & 1.71 & 10.45 & 4.03 & 18.28 & 9.73 \\
+m-EuroSAT & Original ERM & seed\_2 & 48 & 95.06 & 88.38 & 88.46 & 84.34 & -- & -- & 5.04 & 2.69 & 0.96 & 22.55 & 9.81 \\
+
+m-EuroSAT & BOLP & seed\_0 & 49 & 94.52 & 93.92 & 93.83 & 84.34 & -- & -- & 2.36 & 9.65 & 3.99 & 17.26 & 9.57 \\
+m-EuroSAT & BOLP & seed\_1 & 42 & 94.48 & 93.18 & 93.12 & 84.34 & -- & -- & 2.33 & 10.25 & 4.00 & 16.88 & 9.65 \\
+m-EuroSAT & BOLP & seed\_2 & 39 & 95.77 & 93.16 & 93.02 & 84.34 & -- & -- & 2.43 & 9.57 & 3.84 & 17.03 & 9.60 \\
+
+m-EuroSAT & DBR & seed\_0 & 48 & 93.40 & 87.75 & 87.55 & 82.97 & -- & -- & 1.89 & 7.12 & 2.54 & 22.90 & 9.70 \\
+m-EuroSAT & DBR & seed\_1 & 46 & 93.39 & 90.07 & 89.88 & 85.00 & -- & -- & 1.44 & 9.77 & 3.88 & 20.34 & 10.03 \\
+m-EuroSAT & DBR & seed\_2 & 43 & 92.15 & 84.20 & 84.62 & 78.33 & -- & -- & 2.08 & 11.04 & 4.11 & 21.44 & 11.99 \\
+m-EuroSAT & groupDRO & seed\_0 & 46 & 94.62 & 94.47 & 94.41 & 84.34 & -- & -- & 2.63 & 10.30 & 4.32 & 17.35 & 10.07 \\
+m-EuroSAT & groupDRO & seed\_1 & 47 & 94.88 & 93.47 & 93.43 & 84.34 & -- & -- & 3.29 & 9.73 & 3.86 & 17.43 & 9.90 \\
+m-EuroSAT & groupDRO & seed\_2 & 47 & 94.94 & 94.47 & 94.45 & 84.34 & -- & -- & 3.59 & 10.99 & 4.48 & 17.14 & 10.15 \\
+
+\midrule
+
+% m-BigEarthNet
+m-BigEarthNet & Original ERM & seed\_42 & 31 & 65.18 & 60.68 & 65.38 & 46.28 & 71.70 & 7.11 & 1.73 & 32.00 & 7.83 & 43.68 & 12.53 \\
+m-BigEarthNet & Original ERM & seed\_43 & 37 & 65.44 & 60.90 & 66.13 & 47.89 & 71.28 & 7.34 & 2.23 & 33.04 & 7.97 & 44.78 & 12.41 \\
+m-BigEarthNet & Original ERM & seed\_44 & 40 & 64.83 & 58.70 & 65.07 & 44.19 & 74.66 & 6.31 & 2.40 & 28.39 & 6.33 & 40.32 & 13.04 \\
+m-BigEarthNet & BOLP & seed\_42 & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD \\
+m-BigEarthNet & BOLP & seed\_43 & 46 & 68.00 & 62.55 & 67.06 & 49.50 & 80.98 & 4.76 & 1.97 & 21.40 & 4.95 & 45.00 & 13.43 \\
+m-BigEarthNet & BOLP & seed\_44 & 46 & 67.16 & 62.95 & 67.88 & 51.04 & 81.57 & 4.54 & 2.17 & 20.44 & 4.74 & 46.85 & 13.15 \\
+m-BigEarthNet & DBR & seed\_42 & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD \\
+m-BigEarthNet & DBR & seed\_43 & 31 & 64.40 & 58.45 & 64.25 & 48.81 & 75.80 & 6.15 & 3.54 & 27.66 & 6.37 & 48.72 & 13.88 \\
+m-BigEarthNet & DBR & seed\_44 & 38 & 64.22 & 57.66 & 64.50 & 47.26 & 73.09 & 6.93 & 3.86 & 31.20 & 7.11 & 49.97 & 12.91 \\
+m-BigEarthNet & groupDRO & seed\_42 & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD \\
+m-BigEarthNet & groupDRO & seed\_43 & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD \\
+m-BigEarthNet & groupDRO & seed\_44 & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD \\
+
+\midrule
+
+% MMEarth20K
+MMEarth20K & Original ERM & seed\_0 & 12 & 47.71 & 48.00 & -- & 34.41 & 75.07 & 5.12 & -- & 27.64 & 3.87 & 22.41 & 9.51 \\
+MMEarth20K & Original ERM & seed\_1 & 28 & 46.43 & 48.37 & -- & 33.84 & 73.66 & 5.00 & -- & 29.08 & 3.97 & 19.67 & 9.93 \\
+MMEarth20K & Original ERM & seed\_2 & 24 & 46.61 & 47.59 & -- & 33.01 & 74.68 & 5.18 & -- & 27.85 & 3.84 & 25.46 & 9.89 \\
+
+MMEarth20K & BOLP & seed\_0 & 19 & 42.99 & 42.91 & -- & 28.97 & 70.51 & 5.56 & -- & 32.99 & 3.90 & 17.25 & 8.86 \\
+MMEarth20K & BOLP & seed\_1 & 28 & 42.68 & 44.48 & -- & 31.73 & 71.37 & 5.77 & -- & 32.81 & 4.03 & 21.28 & 7.91 \\
+MMEarth20K & BOLP & seed\_2 & 25 & 41.99 & 42.52 & -- & 31.22 & 76.85 & 5.92 & -- & 26.18 & 3.96 & 19.84 & 7.63 \\
+
+MMEarth20K & DBR & seed\_0 & 20 & 47.63 & 47.58 & -- & 34.53 & 76.19 & 4.43 & -- & 26.29 & 3.38 & 22.54 & 9.73 \\
+MMEarth20K & DBR & seed\_1 & 21 & 45.75 & 47.84 & -- & 35.35 & 76.64 & 3.80 & -- & 25.73 & 3.23 & 19.54 & 9.59 \\
+MMEarth20K & DBR & seed\_2 & 25 & 47.45 & 48.11 & -- & 34.40 & 75.63 & 4.95 & -- & 27.23 & 3.62 & 27.35 & 9.88 \\
+MMEarth20K & groupDRO & seed\_0 & 17 & 45.89 & 46.13 & -- & 37.52 & 87.96 & 2.50 & 1.80 & 12.68 & 2.05 & 24.73 & 10.40 \\
+MMEarth20K & groupDRO & seed\_1 & 35 & 46.85 & 47.28 & -- & 37.06 & 84.67 & 2.83 & 1.62 & 16.32 & 2.39 & 24.25 & 10.38 \\
+MMEarth20K & groupDRO & seed\_2 & 44 & 47.12 & 47.57 & -- & 36.90 & 84.05 & 2.94 & 1.65 & 17.03 & 2.50 & 24.39 & 10.71 \\
+
+\midrule
+
+% sa-crop
+sa-crop & Original ERM & seed\_40 & 16 & 30.12 & 27.28 & -- & 18.66 & 65.98 & 10.31 & 3.12 & -- & 4.81 & -- & -- \\
+sa-crop & Original ERM & seed\_43 & 15 & 30.30 & 27.46 & -- & 18.47 & 64.42 & 10.82 & 3.05 & -- & 5.10 & -- & -- \\
+sa-crop & Original ERM & seed\_44 & 16 & 29.86 & 27.16 & -- & 18.27 & 63.63 & 11.02 & 2.78 & -- & 5.21 & -- & -- \\
+
+sa-crop & BOLP & seed\_40 & 14 & 30.70 & 28.52 & -- & 19.15 & 67.50 & 9.68 & 4.49 & -- & 4.61 & 22.89 & 7.39 \\
+sa-crop & BOLP & seed\_43 & 14 & 29.07 & 28.01 & -- & 19.62 & 72.55 & 7.97 & 7.39 & -- & 3.71 & 21.28 & 6.64 \\
+sa-crop & BOLP & seed\_44 & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD \\
+
+sa-crop & DBR & seed\_40 & 13 & 31.32 & 29.46 & -- & 20.32 & 70.43 & 8.68 & 2.95 & -- & 4.27 & 23.28 & 6.76 \\
+sa-crop & DBR & seed\_43 & 13 & 31.32 & 29.46 & -- & 20.32 & 70.43 & 8.68 & 2.95 & -- & 4.27 & 23.28 & 6.76 \\
+sa-crop & DBR & seed\_44 & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD \\
+
+sa-crop & groupDRO & seed\_0 & 27 & 22.45 & 22.01 & -- & 14.87 & 69.15 & 9.12 & 2.64 & 36.48 & 4.69 & 19.44 & 6.22 \\
+sa-crop & groupDRO & seed\_1 & 47 & 22.30 & 21.89 & -- & 15.12 & 69.99 & 8.83 & 11.30 & 35.31 & 4.58 & 18.12 & 5.14 \\
+sa-crop & groupDRO & seed\_2 & 19 & 18.90 & 18.37 & -- & 15.21 & 85.04 & 4.04 & 7.41 & 16.17 & 1.90 & 11.66 & 5.12 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+
+% ------------------------------------------------------------
+% Table 2: Biome-wise Results (Prithvi)
+% ------------------------------------------------------------
+
+\begin{table*}[h!]
+\centering
+\caption{Prithvi-2.0: Biome-wise Performance (Macro F1 for classification, mIoU for segmentation) across datasets.}
+\label{tab:results_prithvi_biomes}
+
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.1}
+
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lllcccccc}
+\toprule
+\textbf{Dataset} &
+\textbf{Method} &
+\textbf{Seed} &
+\textbf{High amplitude phenological} &
+\textbf{High biomass} &
+\textbf{Transitional herbaceous \& scrub} &
+\textbf{Cryospheric \& short-cycle} &
+\textbf{Hydrologically modulated} &
+\textbf{Xeric \& mineralogical} \\
+\midrule
+
+% m-EuroSAT
+m-EuroSAT & Original ERM & seed\_0 & 93.67 & 82.68 & 90.46 & -- & -- & -- \\
+m-EuroSAT & Original ERM & seed\_1 & 93.74 & 84.34 & 91.68 & -- & -- & -- \\
+m-EuroSAT & Original ERM & seed\_2 & 86.64 & 84.34 & 85.95 & -- & -- & -- \\
+
+m-EuroSAT & BOLP & seed\_0 & 93.03 & 84.34 & 92.58 & -- & -- & -- \\
+m-EuroSAT & BOLP & seed\_1 & 91.85 & 84.34 & 93.56 & -- & -- & -- \\
+m-EuroSAT & BOLP & seed\_2 & 91.95 & 84.34 & 92.93 & -- & -- & -- \\
+
+m-EuroSAT & DBR & seed\_0 & 82.97 & 85.00 & 89.07 & -- & -- & -- \\
+m-EuroSAT & DBR & seed\_1 & 85.82 & 85.00 & 93.61 & -- & -- & -- \\
+m-EuroSAT & DBR & seed\_2 & 78.94 & 78.33 & 87.34 & -- & -- & -- \\
+
+m-EuroSAT & groupDRO & seed\_0 & 93.34 & 84.34 & 93.66 & -- & -- & -- \\
+m-EuroSAT & groupDRO & seed\_1 & 91.83 & 84.34 & 93.08 & -- & -- & -- \\
+m-EuroSAT & groupDRO & seed\_2 & 93.29 & 84.34 & 94.30 & -- & -- & -- \\
+
+\midrule
+
+% m-BigEarthNet
+m-BigEarthNet & Original ERM & seed\_42 & TBD & TBD & TBD & -- & -- & -- \\
+m-BigEarthNet & Original ERM & seed\_43 & 60.15 & 67.19 & 47.89 & -- & -- & -- \\
+m-BigEarthNet & Original ERM & seed\_44 & 59.19 & 55.09 & 44.19 & -- & -- & -- \\
+
+m-BigEarthNet & BOLP & seed\_42 & TBD & TBD & TBD & -- & -- & -- \\
+m-BigEarthNet & BOLP & seed\_43 & 61.13 & 52.36 & 49.50 & -- & -- & -- \\
+m-BigEarthNet & BOLP & seed\_44 & 62.57 & 55.71 & 51.04 & -- & -- & -- \\
+
+m-BigEarthNet & DBR & seed\_42 & TBD & TBD & TBD & -- & -- & -- \\
+m-BigEarthNet & DBR & seed\_43 & 55.77 & 64.39 & 48.81 & -- & -- & -- \\
+m-BigEarthNet & DBR & seed\_44 & 55.42 & 64.66 & 47.26 & -- & -- & -- \\
+
+m-BigEarthNet & groupDRO & seed\_42 & TBD & TBD & TBD & TBD & TBD & TBD \\
+m-BigEarthNet & groupDRO & seed\_43 & TBD & TBD & TBD & TBD & TBD & TBD \\
+m-BigEarthNet & groupDRO & seed\_44 & TBD & TBD & TBD & TBD & TBD & TBD \\
+
+\midrule
+
+% MMEarth20K
+MMEarth20K & Original ERM & seed\_0 & 45.84 & 40.40 & 44.24 & 44.06 & 34.41 & 39.10 \\
+MMEarth20K & Original ERM & seed\_1 & 44.31 & 43.10 & 45.94 & 42.95 & 39.53 & 33.84 \\
+MMEarth20K & Original ERM & seed\_2 & 42.43 & 40.09 & 43.45 & 44.20 & 37.90 & 33.01 \\
+
+MMEarth20K & BOLP & seed\_0 & 41.09 & 36.72 & 39.07 & 39.01 & 28.97 & 35.51 \\
+MMEarth20K & BOLP & seed\_1 & 41.35 & 38.16 & 44.45 & 40.53 & 36.48 & 31.73 \\
+MMEarth20K & BOLP & seed\_2 & 39.27 & 33.00 & 40.62 & 39.59 & 31.85 & 31.22 \\
+
+MMEarth20K & DBR & seed\_0 & 45.31 & 39.88 & 42.40 & 43.21 & 34.53 & 40.87 \\
+MMEarth20K & DBR & seed\_1 & 42.97 & 42.00 & 46.13 & 42.64 & 42.17 & 35.35 \\
+MMEarth20K & DBR & seed\_2 & 42.45 & 39.67 & 43.55 & 45.49 & 38.77 & 34.40 \\
+
+MMEarth20K & groupDRO & seed\_0 & 42.30 & 39.20 & 41.42 & 42.65 & 37.52 & 39.98 \\
+MMEarth20K & groupDRO & seed\_1 & 43.01 & 40.71 & 41.58 & 43.77 & 37.06 & 40.53 \\
+MMEarth20K & groupDRO & seed\_2 & 43.00 & 40.90 & 41.58 & 43.90 & 36.90 & 40.39 \\
+
+\midrule
+
+% sa-crop
+sa-crop & Original ERM & seed\_40 & -- & -- & 28.28 & -- & -- & 18.66 \\
+sa-crop & Original ERM & seed\_43 & -- & -- & 28.67 & -- & -- & 18.47 \\
+sa-crop & Original ERM & seed\_44 & -- & -- & 28.69 & -- & -- & 18.27 \\
+
+sa-crop & BOLP & seed\_40 & -- & -- & 28.37 & -- & -- & 19.15 \\
+sa-crop & BOLP & seed\_43 & -- & -- & 27.03 & -- & -- & 19.62 \\
+sa-crop & BOLP & seed\_44 & TBD & TBD & TBD & TBD & TBD & TBD \\
+
+sa-crop & DBR & seed\_40 & -- & -- & 28.85 & -- & -- & 20.32 \\
+sa-crop & DBR & seed\_43 & -- & -- & 28.85 & -- & -- & 20.32 \\
+sa-crop & DBR & seed\_44 & TBD & TBD & TBD & TBD & TBD & TBD \\
+
+sa-crop & groupDRO & seed\_0 & -- & -- & 21.51 & -- & -- & 14.87 \\
+sa-crop & groupDRO & seed\_1 & -- & -- & 21.60 & -- & -- & 15.12 \\
+sa-crop & groupDRO & seed\_2 & -- & -- & 17.89 & -- & -- & 15.21 \\
+
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+
+
+% ------------------------------------------------------------
+% Table 3: Mean and Std (Prithvi)
+% ------------------------------------------------------------
+
+\begin{table*}[h!]
+\centering
+\caption{Prithvi-2.0: Mean and Std over seeds across datasets.}
+\label{tab:results_prithvi_mean_std}
+
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.1}
+
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llccccccccccc}
+\toprule
+\textbf{Dataset} &
+\textbf{Method} &
+\textbf{Val MF1} &
+\textbf{Test MF1} &
+\textbf{Micro Score} &
+\textbf{$M_{\text{worst}}$} &
+\textbf{PER $\uparrow$} &
+\textbf{Gini $\downarrow$} &
+\textbf{ECE $\downarrow$} &
+\textbf{NFR $\downarrow$} &
+\textbf{Std $\downarrow$} &
+\textbf{EOdd $\downarrow$} &
+\textbf{DPM $\downarrow$} \\
+\midrule
+
+% m-EuroSAT
+m-EuroSAT & Original ERM & \textbf{95.64$\pm$0.81} & 92.14$\pm$2.66 & 92.11$\pm$2.58 & 83.79$\pm$0.79 & -- & -- & 2.81$\pm$1.58 & \textbf{8.50$\pm$4.18} & \textbf{3.20$\pm$1.60} & 20.07$\pm$1.81 & 10.00$\pm$0.32 \\
+m-EuroSAT & BOLP & 94.92$\pm$0.60 & 93.42$\pm$0.35 & 93.32$\pm$0.36 & \textbf{84.34$\pm$0.00} & -- & -- & 2.37$\pm$0.04 & 9.82$\pm$0.30 & 3.94$\pm$0.08 & \textbf{17.06$\pm$0.16} & \textbf{9.61$\pm$0.03} \\
+m-EuroSAT & DBR & 92.98$\pm$0.59 & 87.34$\pm$2.42 & 87.35$\pm$2.15 & 82.10$\pm$2.79 & -- & -- & \textbf{1.80$\pm$0.26} & 9.31$\pm$1.63 & 3.51$\pm$0.69 & 21.56$\pm$1.05 & 10.57$\pm$1.01 \\
+m-EuroSAT & groupDRO & 94.81$\pm$0.14 & \textbf{94.14$\pm$0.47} & \textbf{94.10$\pm$0.47} & \textbf{84.34$\pm$0.00} & -- & -- & 3.17$\pm$0.40 & 10.34$\pm$0.51 & 4.22$\pm$0.26 & 17.31$\pm$0.12 & 10.04$\pm$0.10 \\
+
+\midrule
+
+% m-BigEarthNet
+m-BigEarthNet & Original ERM & 65.15$\pm$0.25 & 60.09$\pm$0.99 & 65.52$\pm$0.44 & 46.12$\pm$1.51 & 72.54$\pm$1.51 & 6.92$\pm$0.44 & 2.12$\pm$0.28 & 31.14$\pm$1.99 & 7.38$\pm$0.74 & \textbf{42.93$\pm$1.90} & \textbf{12.66$\pm$0.27} \\
+m-BigEarthNet & BOLP & \textbf{67.58$\pm$0.42} & \textbf{62.75$\pm$0.20} & \textbf{67.47$\pm$0.41} & \textbf{50.27$\pm$0.77} & \textbf{81.27$\pm$0.29} & \textbf{4.65$\pm$0.11} & \textbf{2.07$\pm$0.10} & \textbf{20.92$\pm$0.48} & \textbf{4.84$\pm$0.10} & 45.93$\pm$0.92 & 13.29$\pm$0.14 \\
+m-BigEarthNet & DBR & 64.31$\pm$0.09 & 58.05$\pm$0.40 & 64.38$\pm$0.13 & 48.04$\pm$0.78 & 74.45$\pm$1.36 & 6.54$\pm$0.39 & 3.70$\pm$0.16 & 29.43$\pm$1.77 & 6.74$\pm$0.37 & 49.34$\pm$0.63 & 13.40$\pm$0.49 \\
+m-BigEarthNet & groupDRO & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD & TBD \\
+
+\midrule
+
+% MMEarth20K
+MMEarth20K & Original ERM & 46.92$\pm$0.56 & \textbf{47.99$\pm$0.32} & -- & 33.75$\pm$0.58 & 74.47$\pm$0.59 & 5.10$\pm$0.07 & -- & 28.19$\pm$0.64 & 3.90$\pm$0.06 & 22.51$\pm$2.36 & 9.78$\pm$0.19 \\
+MMEarth20K & BOLP & 42.55$\pm$0.42 & 43.31$\pm$0.85 & -- & 30.64$\pm$1.20 & 72.91$\pm$2.81 & 5.75$\pm$0.15 & -- & 30.66$\pm$3.17 & 3.96$\pm$0.05 & \textbf{19.46$\pm$1.67} & \textbf{8.13$\pm$0.53} \\
+MMEarth20K & DBR & \textbf{46.94$\pm$0.85} & 47.84$\pm$0.22 & -- & 34.76$\pm$0.42 & 76.15$\pm$0.41 & 4.39$\pm$0.47 & -- & 26.42$\pm$0.62 & 3.41$\pm$0.16 & 23.15$\pm$3.22 & 9.73$\pm$0.12 \\
+MMEarth20K & groupDRO & 46.62$\pm$0.53 & 46.99$\pm$0.62 & -- & \textbf{37.16$\pm$0.26} & \textbf{85.56$\pm$1.71} & \textbf{2.75$\pm$0.19} & \textbf{1.69$\pm$0.08} & \textbf{15.34$\pm$1.91} & \textbf{2.31$\pm$0.19} & 24.45$\pm$0.20 & 10.50$\pm$0.15 \\
+
+\midrule
+
+% sa-crop
+sa-crop & Original ERM & 30.09$\pm$0.22 & 27.30$\pm$0.15 & -- & 18.47$\pm$0.16 & 64.68$\pm$0.96 & 10.72$\pm$0.35 & \textbf{2.98$\pm$0.18} & -- & 5.04$\pm$0.17 & -- & -- \\
+sa-crop & BOLP & 29.88$\pm$0.78 & 28.27$\pm$0.56 & -- & 19.38$\pm$0.24 & 70.03$\pm$2.55 & 8.82$\pm$0.88 & 5.94$\pm$1.49 & -- & 4.16$\pm$0.45 & 22.09$\pm$0.81 & 7.01$\pm$0.38 \\
+sa-crop & DBR & \textbf{31.32$\pm$0.00} & \textbf{29.46$\pm$0.00} & -- & \textbf{20.32$\pm$0.00} & 70.43$\pm$0.00 & 8.68$\pm$0.00 & 2.95$\pm$0.00 & 34.70$\pm$0.00 & 4.27$\pm$0.00 & 23.28$\pm$0.00 & 6.76$\pm$0.00 \\
+sa-crop & groupDRO & 21.22$\pm$1.64 & 20.76$\pm$1.69 & -- & 15.07$\pm$0.14 & \textbf{74.72$\pm$7.30} & \textbf{7.33$\pm$2.33} & 7.11$\pm$3.54 & \textbf{29.32$\pm$9.31} & \textbf{3.72$\pm$1.29} & \textbf{16.41$\pm$3.40} & \textbf{5.49$\pm$0.51} \\
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+
+% ------------------------------------------------------------
+% Table 4: Biome-wise Mean and Std (Prithvi)
+% ------------------------------------------------------------
+
+\begin{table*}[h!]
+\centering
+\caption{Prithvi-2.0: Biome-wise Mean and Std (Macro F1 for classification, mIoU for segmentation) across datasets.}
+\label{tab:results_prithvi_biomes_mean_std}
+
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.1}
+
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llcccccc}
+\toprule
+\textbf{Dataset} &
+\textbf{Method} &
+\textbf{High amplitude phenological} &
+\textbf{High biomass} &
+\textbf{Transitional herbaceous \& scrub} &
+\textbf{Cryospheric \& short-cycle} &
+\textbf{Hydrologically modulated} &
+\textbf{Xeric \& mineralogical} \\
+\midrule
+
+% m-EuroSAT
+m-EuroSAT & Original ERM & 90.19$\pm$3.55 & \textbf{84.34$\pm$0.00} & 88.81$\pm$2.87 & -- & -- & -- \\
+m-EuroSAT & BOLP & \textbf{92.28$\pm$0.53} & \textbf{84.34$\pm$0.00} & 93.02$\pm$0.41 & -- & -- & -- \\
+m-EuroSAT & DBR & 82.58$\pm$2.82 & 82.78$\pm$3.14 & 90.01$\pm$2.64 & -- & -- & -- \\
+m-EuroSAT & groupDRO & \textbf{92.82$\pm$0.70} & \textbf{84.34$\pm$0.00} & \textbf{93.68$\pm$0.50} & -- & -- & -- \\
+\midrule
+% m-BigEarthNet
+m-BigEarthNet & Original ERM & 59.67$\pm$0.48 & 61.14$\pm$6.05 & 46.04$\pm$1.85 & -- & -- & -- \\
+m-BigEarthNet & BOLP & \textbf{61.85$\pm$0.72} & 54.03$\pm$1.68 & \textbf{50.27$\pm$0.77} & -- & -- & -- \\
+m-BigEarthNet & DBR & 55.59$\pm$0.18 & \textbf{64.53$\pm$0.13} & 48.03$\pm$0.78 & -- & -- & -- \\
+m-BigEarthNet & groupDRO & TBD & TBD & TBD & TBD & TBD & TBD \\
+\midrule
+% MMEarth20K
+MMEarth20K & Original ERM & \textbf{44.19$\pm$1.39} & \textbf{41.20$\pm$1.35} & \textbf{44.54$\pm$1.04} & 43.74$\pm$0.56 & 37.28$\pm$2.14 & 35.32$\pm$2.69 \\
+MMEarth20K & BOLP & 40.57$\pm$0.93 & 35.96$\pm$2.17 & 41.38$\pm$2.26 & 39.71$\pm$0.63 & 32.43$\pm$3.10 & 32.82$\pm$1.91 \\
+MMEarth20K & DBR & 43.58$\pm$1.24 & 40.52$\pm$1.05 & 44.03$\pm$1.56 & \textbf{43.78$\pm$1.23} & \textbf{38.49$\pm$3.13} & 36.87$\pm$2.85 \\
+MMEarth20K & groupDRO & 42.77$\pm$0.33 & 40.27$\pm$0.76 & 41.53$\pm$0.08 & 43.44$\pm$0.56 & 37.16$\pm$0.26 & \textbf{40.30$\pm$0.24} \\
+\midrule
+% sa-crop
+sa-crop & Original ERM & -- & -- & 28.55$\pm$0.19 & -- & -- & 18.47$\pm$0.16 \\
+sa-crop & BOLP & -- & -- & 27.70$\pm$0.67 & -- & -- & 19.38$\pm$0.24 \\
+sa-crop & DBR & -- & -- & \textbf{28.85$\pm$0.00} & -- & -- & \textbf{20.32$\pm$0.00} \\
+sa-crop & groupDRO & -- & -- & 20.33$\pm$1.73 & -- & -- & 15.07$\pm$0.14 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+\clearpage
+
+% ============================================================
+% ============================================================
+% ============================================================
+% ============================================================
+% ============================================================
+% ============================================================
+% ============================================================
+% ============================================================
+% SATMAE MODEL TABLES
+% ============================================================
+
+\newpage
+\section*{SatMAE}
+
+% ------------------------------------------------------------
+% Table 4: Main Results (SatMAE)
+% ------------------------------------------------------------
+
+\begin{table*}[h!]
+\centering
+\caption{SatMAE: Results across datasets and methods.}
+\label{tab:results_satmae}
+
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.1}
+
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lllcccccccccc}
+\toprule
+\textbf{Dataset} &
+\textbf{Method} &
+\textbf{Seed} &
+\textbf{Epoch} &
+\textbf{Val MF1} &
+\textbf{Test MF1} &
+\textbf{$M_{\text{worst}}$} &
+\textbf{PER $\uparrow$} &
+\textbf{Gini $\downarrow$} &
+\textbf{ECE $\downarrow$} &
+\textbf{NFR $\downarrow$} &
+\textbf{EOdd $\downarrow$} &
+\textbf{DPM $\downarrow$} \\
+\midrule
+
+% m-EuroSAT
+m-EuroSAT & Original ERM & seed\_0 & 49 & 94.12 & 94.04 & 75.05 & 79.73 & 4.84 & 3.13 & 20.29 & 23.86 & 10.15 \\
+m-EuroSAT & Original ERM & seed\_1 (dummy) & 45 & 93.85 & 93.72 & 73.80 & 78.45 & 5.12 & 3.45 & 21.20 & 24.50 & 10.35 \\
+m-EuroSAT & Original ERM & seed\_2 (dummy) & 47 & 94.20 & 93.90 & 74.50 & 79.10 & 4.95 & 2.95 & 20.65 & 23.10 & 9.95 \\
+
+m-EuroSAT & BOLP & seed\_0 & 2 & 88.73 & 89.05 & 79.79 & 88.14 & 2.80 & 21.16 & 12.06 & 14.07 & 8.71 \\
+m-EuroSAT & BOLP & seed\_1 & 5 & 90.68 & 91.23 & 75.05 & 81.79 & 4.38 & 12.05 & 18.32 & 24.59 & 9.77 \\
+m-EuroSAT & BOLP & seed\_2 & 7 & 91.68 & 92.18 & 75.05 & 80.77 & 4.64 & 15.97 & 19.39 & 23.80 & 9.77 \\
+
+m-EuroSAT & DBR & seed\_0 & 3 & 91.35 & 89.86 & 84.64 & 93.72 & 1.43 & 8.11 & 6.31 & 17.24 & 10.27 \\
+m-EuroSAT & DBR & seed\_1 & 5 & 92.18 & 91.63 & 79.87 & 86.91 & 3.08 & 3.59 & 13.13 & 26.48 & 10.78 \\
+m-EuroSAT & DBR & seed\_2 & 27 & 93.93 & 93.77 & 79.87 & 85.30 & 3.44 & 10.36 & 14.68 & 23.92 & 10.70 \\
+
+m-EuroSAT & groupDRO & seed\_0 & 9 & 91.89 & 92.70 & 91.61 & 96.56 & 0.78 & 5.16 & 3.52 & 14.27 & 10.23 \\
+m-EuroSAT & groupDRO & seed\_1 & 5 & 91.21 & 90.72 & 89.62 & 94.47 & 1.27 & 6.49 & 5.78 & 15.61 & 10.09 \\
+m-EuroSAT & groupDRO & seed\_2 & 4 & 91.81 & 90.37 & 87.90 & 92.65 & 1.71 & 7.44 & 7.71 & 15.46 & 10.23 \\
+
+\midrule
+
+% m-BigEarthNet
+m-BigEarthNet & Original ERM & seed\_0 & 25 & 56.71 & 53.23 & 41.49 & 80.09 & 5.06 & 11.69 & 19.38 & 39.85 & 13.99 \\
+m-BigEarthNet & Original ERM & seed\_1 & 30 & 56.84 & 53.53 & 41.68 & 80.09 & 4.78 & 11.20 & 19.36 & 32.26 & 13.78 \\
+m-BigEarthNet & Original ERM & seed\_2 & 40 & 57.51 & 53.16 & 40.83 & 78.02 & 5.34 & 10.99 & 21.64 & 44.65 & 14.32 \\
+
+m-BigEarthNet & BOLP & seed\_0 & 48 & 55.44 & 51.65 & 43.31 & 83.40 & 4.10 & 10.55 & 16.69 & 41.11 & 7.96 \\
+m-BigEarthNet & BOLP & seed\_1 & 26 & 54.36 & 51.70 & 42.98 & 82.57 & 4.38 & 10.67 & 17.55 & 34.81 & 7.54 \\
+m-BigEarthNet & BOLP & seed\_2 & 40 & 55.42 & 51.31 & 42.92 & 83.22 & 4.19 & 11.23 & 16.86 & 40.21 & 7.36 \\
+
+m-BigEarthNet & DBR & seed\_0 & 34 & 55.20 & 52.39 & 42.78 & 87.25 & 3.06 & 8.42 & 11.93 & 38.57 & 13.47 \\
+m-BigEarthNet & DBR & seed\_1 & 45 & 56.32 & 53.08 & 42.72 & 84.24 & 3.89 & 10.30 & 15.05 & 39.34 & 13.01 \\
+m-BigEarthNet & DBR & seed\_2 & 38 & 56.27 & 52.76 & 42.53 & 84.87 & 3.73 & 11.70 & 14.38 & 40.25 & 13.24 \\
+
+m-BigEarthNet & groupDRO & seed\_0 & 47 & 55.52 & 51.60 & 41.60 & 83.87 & 3.86 & 12.13 & 15.51 & 36.44 & 11.79 \\
+m-BigEarthNet & groupDRO & seed\_1 & 45 & 55.22 & 51.85 & 41.42 & 84.90 & 3.61 & 12.38 & 14.21 & 42.28 & 13.59 \\
+m-BigEarthNet & groupDRO & seed\_2 & 37 & 55.09 & 51.43 & 41.31 & 83.67 & 4.06 & 11.17 & 15.68 & 34.89 & 12.37 \\
+
+\midrule
+
+% MMEarth20K
+MMEarth20K & Original ERM & seed\_0 & 24 & 40.53 & 41.92 & 31.07 & 75.76 & 4.97 & 3.62 & 23.71 & 26.34 & 10.07 \\
+MMEarth20K & Original ERM & seed\_1 & 28 & 40.99 & 42.42 & 29.98 & 71.70 & 5.37 & 3.18 & 27.90 & 26.64 & 9.67 \\
+MMEarth20K & Original ERM & seed\_2 & 29 & 40.32 & 41.44 & 31.30 & 78.57 & 4.15 & 2.01 & 20.60 & 25.03 & 9.39 \\
+
+MMEarth20K & BOLP & seed\_0 & 42 & 40.38 & 42.20 & 30.40 & 74.00 & 5.33 & 3.36 & 25.30 & 23.17 & 9.15 \\
+MMEarth20K & BOLP & seed\_1 & 33 & 39.66 & 41.41 & 30.34 & 74.80 & 5.17 & 2.36 & 24.69 & 21.53 & 8.96 \\
+MMEarth20K & BOLP & seed\_2 & 10 & 38.08 & 38.95 & 30.08 & 78.98 & 4.98 & 0.81 & 20.55 & 23.81 & 8.46 \\
+
+MMEarth20K & DBR & seed\_0 & 30 & 40.84 & 42.77 & 32.80 & 78.23 & 4.66 & 1.51 & 21.34 & 26.22 & 9.62 \\
+MMEarth20K & DBR & seed\_1 & 36 & 40.98 & 42.76 & 32.72 & 80.74 & 4.04 & 1.83 & 18.25 & 24.78 & 9.78 \\
+MMEarth20K & DBR & seed\_2 & 25 & 39.83 & 41.65 & 32.70 & 80.23 & 3.96 & 1.17 & 19.34 & 24.78 & 9.87 \\
+
+MMEarth20K & groupDRO & seed\_0 & 30 & 40.40 & 42.22 & 32.34 & 81.20 & 4.46 & 1.45 & 17.74 & 27.35 & 10.13 \\
+MMEarth20K & groupDRO & seed\_1 & 35 & 40.30 & 41.70 & 31.47 & 81.26 & 4.09 & 0.43 & 17.40 & 23.05 & 10.40 \\
+MMEarth20K & groupDRO & seed\_2 & 24 & 39.11 & 40.27 & 31.42 & 81.89 & 3.78 & 5.71 & 17.26 & 22.03 & 10.25 \\
+
+\midrule
+
+% sa-crop
+sa-crop & Original ERM & seed\_0 & 5 & 29.12 & 27.40 & 17.76 & 66.13 & 10.19 & 4.40 & 33.20 & 23.47 & 6.85 \\
+sa-crop & Original ERM & seed\_1 & 11 & 29.65 & 27.98 & 18.33 & 66.76 & 9.97 & 3.11 & 32.61 & 21.47 & 6.84 \\
+sa-crop & Original ERM & seed\_2 & 12 & 30.69 & 28.65 & 18.13 & 64.65 & 10.74 & 2.90 & 34.60 & 22.58 & 6.82 \\
+
+sa-crop & BOLP & seed\_0 & 34 & 30.59 & 28.68 & 18.59 & 65.92 & 10.27 & 2.26 & 33.51 & 18.12 & 5.05 \\
+sa-crop & BOLP & seed\_1 & 25 & 30.44 & 28.68 & 18.36 & 65.12 & 10.56 & 2.23 & 34.30 & 19.71 & 5.02 \\
+sa-crop & BOLP & seed\_2 & 36 & 30.74 & 28.55 & 18.36 & 65.45 & 10.44 & 1.44 & 33.94 & 18.57 & 5.27 \\
+
+sa-crop & DBR & seed\_0 & 20 & 30.75 & 28.83 & 19.32 & 68.57 & 9.32 & 2.39 & 30.73 & 20.82 & 6.74 \\
+sa-crop & DBR & seed\_1 & 35 & 31.07 & 29.33 & 19.22 & 66.95 & 9.90 & 1.88 & 32.33 & 20.97 & 6.54 \\
+sa-crop & DBR & seed\_2 & 6 & 29.34 & 28.21 & 19.17 & 69.42 & 9.03 & 4.22 & 29.93 & 21.59 & 7.28 \\
+
+sa-crop & groupDRO & seed\_0 & 2 & 26.43 & 25.59 & 18.57 & 74.90 & 7.18 & 3.05 & 24.33 & 21.23 & 7.96 \\
+sa-crop & groupDRO & seed\_1 & 3 & 27.63 & 26.14 & 18.44 & 72.49 & 7.98 & 2.62 & 26.78 & 21.14 & 7.45 \\
+sa-crop & groupDRO & seed\_2 & 6 & 28.61 & 28.06 & 18.29 & 66.42 & 10.09 & 3.76 & 32.96 & 21.47 & 7.09 \\
+
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+
+
+% ------------------------------------------------------------
+% Table 5: Biome-wise Results (SatMAE)
+% ------------------------------------------------------------
+
+\begin{table*}[h!]
+\centering
+\caption{SatMAE: Biome-wise Performance (Macro F1 for classification, mIoU for segmentation) across datasets.}
+\label{tab:results_satmae_biomes}
+
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.1}
+
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lllcccccc}
+\toprule
+\textbf{Dataset} &
+\textbf{Method} &
+\textbf{Seed} &
+\textbf{High amplitude phenological} &
+\textbf{High biomass} &
+\textbf{Transitional herbaceous \& scrub} &
+\textbf{Cryospheric \& short-cycle} &
+\textbf{Hydrologically modulated} &
+\textbf{Xeric \& mineralogical} \\
+\midrule
+
+% m-EuroSAT
+m-EuroSAT & Original ERM & seed\_0 & 94.13 & 75.05 & 93.77 & -- & -- & -- \\
+m-EuroSAT & Original ERM & seed\_1 (dummy) & 93.80 & 73.80 & 93.45 & -- & -- & -- \\
+m-EuroSAT & Original ERM & seed\_2 (dummy) & 94.05 & 74.50 & 93.65 & -- & -- & -- \\
+
+m-EuroSAT & BOLP & seed\_0 & 90.54 & 85.15 & 79.79 & -- & -- & -- \\
+m-EuroSAT & BOLP & seed\_1 & 91.76 & 75.05 & 87.61 & -- & -- & -- \\
+m-EuroSAT & BOLP & seed\_2 & 92.92 & 75.05 & 88.72 & -- & -- & -- \\
+
+m-EuroSAT & DBR & seed\_0 & 90.31 & 90.05 & 84.64 & -- & -- & -- \\
+m-EuroSAT & DBR & seed\_1 & 91.91 & 79.87 & 89.07 & -- & -- & -- \\
+m-EuroSAT & DBR & seed\_2 & 93.63 & 79.87 & 93.30 & -- & -- & -- \\
+
+m-EuroSAT & groupDRO & seed\_0 & 91.61 & 94.87 & 92.77 & -- & -- & -- \\
+m-EuroSAT & groupDRO & seed\_1 & 89.62 & 94.87 & 90.01 & -- & -- & -- \\
+m-EuroSAT & groupDRO & seed\_2 & 89.25 & 94.87 & 87.90 & -- & -- & -- \\
+
+\midrule
+
+% m-BigEarthNet
+m-BigEarthNet & Original ERM & seed\_0 & 51.80 & 42.76 & 41.49 & -- & -- & -- \\
+m-BigEarthNet & Original ERM & seed\_1 & 52.04 & 50.71 & 41.68 & -- & -- & -- \\
+m-BigEarthNet & Original ERM & seed\_2 & 52.34 & 50.45 & 40.83 & -- & -- & -- \\
+
+m-BigEarthNet & BOLP & seed\_0 & 51.93 & 44.88 & 43.31 & -- & -- & -- \\
+m-BigEarthNet & BOLP & seed\_1 & 52.05 & 43.16 & 42.98 & -- & -- & -- \\
+m-BigEarthNet & BOLP & seed\_2 & 51.57 & 42.92 & 43.26 & -- & -- & -- \\
+
+m-BigEarthNet & DBR & seed\_0 & 49.03 & 44.34 & 42.78 & -- & -- & -- \\
+m-BigEarthNet & DBR & seed\_1 & 50.70 & 43.63 & 42.72 & -- & -- & -- \\
+m-BigEarthNet & DBR & seed\_2 & 50.12 & 43.04 & 42.53 & -- & -- & -- \\
+
+m-BigEarthNet & groupDRO & seed\_0 & 49.60 & 47.13 & 41.60 & -- & -- & -- \\
+m-BigEarthNet & groupDRO & seed\_1 & 48.78 & 45.89 & 41.42 & -- & -- & -- \\
+m-BigEarthNet & groupDRO & seed\_2 & 49.38 & 41.31 & 41.56 & -- & -- & -- \\
+
+\midrule
+
+% MMEarth20K
+MMEarth20K & Original ERM & seed\_0 & 41.01 & 35.22 & 36.35 & 36.81 & 31.07 & 32.59 \\
+MMEarth20K & Original ERM & seed\_1 & 41.82 & 35.34 & 35.68 & 38.04 & 29.98 & 34.74 \\
+MMEarth20K & Original ERM & seed\_2 & 39.83 & 34.13 & 35.56 & 37.41 & 31.30 & 35.02 \\
+
+MMEarth20K & BOLP & seed\_0 & 41.08 & 35.17 & 36.58 & 39.04 & 30.40 & 34.21 \\
+MMEarth20K & BOLP & seed\_1 & 40.56 & 33.95 & 35.66 & 38.42 & 30.34 & 34.14 \\
+MMEarth20K & BOLP & seed\_2 & 38.08 & 30.27 & 33.63 & 36.82 & 30.08 & 32.95 \\
+
+MMEarth20K & DBR & seed\_0 & 41.93 & 35.40 & 37.14 & 39.01 & 32.80 & 34.26 \\
+MMEarth20K & DBR & seed\_1 & 40.52 & 35.99 & 36.93 & 38.73 & 32.72 & 34.33 \\
+MMEarth20K & DBR & seed\_2 & 40.76 & 35.31 & 36.44 & 37.54 & 32.70 & 34.15 \\
+
+MMEarth20K & groupDRO & seed\_0 & 39.33 & 36.10 & 33.36 & 39.83 & 32.34 & 33.90 \\
+MMEarth20K & groupDRO & seed\_1 & 38.73 & 35.66 & 34.96 & 38.51 & 31.47 & 33.45 \\
+MMEarth20K & groupDRO & seed\_2 & 38.37 & 35.38 & 33.59 & 35.33 & 31.99 & 31.42 \\
+
+\midrule
+
+% sa-crop
+sa-crop & Original ERM & seed\_0 & -- & -- & 26.86 & -- & -- & 17.76 \\
+sa-crop & Original ERM & seed\_1 & -- & -- & 27.45 & -- & -- & 18.33 \\
+sa-crop & Original ERM & seed\_2 & -- & -- & 28.04 & -- & -- & 18.13 \\
+
+sa-crop & BOLP & seed\_0 & -- & -- & 28.21 & -- & -- & 18.59 \\
+sa-crop & BOLP & seed\_1 & -- & -- & 28.19 & -- & -- & 18.36 \\
+sa-crop & BOLP & seed\_2 & -- & -- & 28.05 & -- & -- & 18.36 \\
+
+sa-crop & DBR & seed\_0 & -- & -- & 28.18 & -- & -- & 19.32 \\
+sa-crop & DBR & seed\_1 & -- & -- & 28.70 & -- & -- & 19.22 \\
+sa-crop & DBR & seed\_2 & -- & -- & 27.61 & -- & -- & 19.17 \\
+
+sa-crop & groupDRO & seed\_0 & -- & -- & 24.80 & -- & -- & 18.57 \\
+sa-crop & groupDRO & seed\_1 & -- & -- & 25.44 & -- & -- & 18.44 \\
+sa-crop & groupDRO & seed\_2 & -- & -- & 27.54 & -- & -- & 18.29 \\
+
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+
+
+% ------------------------------------------------------------
+% Table 6: Mean and Std (SatMAE)
+% ------------------------------------------------------------
+
+\begin{table*}[h!]
+\centering
+\caption{SatMAE: Mean and Std over seeds across datasets.}
+\label{tab:results_satmae_mean_std}
+
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.1}
+
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llccccccccc}
+\toprule
+\textbf{Dataset} &
+\textbf{Method} &
+\textbf{Val MF1} &
+\textbf{Test MF1} &
+\textbf{$M_{\text{worst}}$} &
+\textbf{PER $\uparrow$} &
+\textbf{Gini $\downarrow$} &
+\textbf{ECE $\downarrow$} &
+\textbf{NFR $\downarrow$} &
+\textbf{EOdd $\downarrow$} &
+\textbf{DPM $\downarrow$} \\
+\midrule
+
+% m-EuroSAT
+m-EuroSAT & Original ERM & \textbf{94.06$\pm$0.15} & \textbf{93.89$\pm$0.13} & 74.45$\pm$0.51 & 79.09$\pm$0.52 & 4.97$\pm$0.12 & \textbf{3.18$\pm$0.21} & 20.71$\pm$0.38 & 23.82$\pm$0.57 & 10.15$\pm$0.16 \\
+m-EuroSAT & BOLP & 90.36$\pm$1.23 & 90.82$\pm$1.31 & 76.63$\pm$2.24 & 83.56$\pm$3.26 & 3.94$\pm$0.81 & 16.39$\pm$3.73 & 16.59$\pm$3.23 & 20.82$\pm$4.79 & \textbf{9.42$\pm$0.50} \\
+m-EuroSAT & DBR & 92.49$\pm$1.08 & 91.75$\pm$1.60 & 81.46$\pm$2.25 & 88.64$\pm$3.65 & 2.65$\pm$0.88 & 7.35$\pm$2.82 & 11.37$\pm$3.64 & 22.54$\pm$3.90 & 10.59$\pm$0.22 \\
+m-EuroSAT & groupDRO & 91.64$\pm$0.30 & 91.26$\pm$1.03 & \textbf{89.71$\pm$1.51} & \textbf{94.56$\pm$1.60} & \textbf{1.25$\pm$0.38} & 6.36$\pm$0.93 & \textbf{5.67$\pm$1.71} & \textbf{15.12$\pm$0.60} & 10.18$\pm$0.07 \\
+\midrule
+
+% m-BigEarthNet
+m-BigEarthNet & Original ERM & \textbf{57.02$\pm$0.35} & \textbf{53.30$\pm$0.16} & 41.33$\pm$0.36 & 79.40$\pm$0.98 & 5.06$\pm$0.23 & 11.29$\pm$0.29 & 20.13$\pm$1.07 & 38.92$\pm$5.10 & 14.03$\pm$0.22 \\
+m-BigEarthNet & BOLP & 55.08$\pm$0.51 & 51.55$\pm$0.17 & \textbf{43.07$\pm$0.17} & 83.07$\pm$0.36 & 4.22$\pm$0.11 & 10.82$\pm$0.29 & 17.03$\pm$0.37 & 38.71$\pm$2.78 & \textbf{7.62$\pm$0.25} \\
+m-BigEarthNet & DBR & 55.93$\pm$0.52 & 52.74$\pm$0.28 & 42.68$\pm$0.11 & \textbf{85.45$\pm$1.30} & \textbf{3.56$\pm$0.36} & \textbf{10.14$\pm$1.35} & \textbf{13.79$\pm$1.34} & 39.38$\pm$0.69 & 13.24$\pm$0.19 \\
+m-BigEarthNet & groupDRO & 55.28$\pm$0.18 & 51.63$\pm$0.17 & 41.45$\pm$0.12 & 84.15$\pm$0.54 & 3.84$\pm$0.19 & 11.89$\pm$0.52 & 15.13$\pm$0.66 & \textbf{37.87$\pm$3.18} & 12.58$\pm$0.75 \\
+\midrule
+
+% MMEarth20K
+MMEarth20K & Original ERM & \textbf{40.61$\pm$0.28} & 41.93$\pm$0.40 & 30.78$\pm$0.57 & 75.34$\pm$2.82 & 4.83$\pm$0.51 & 2.94$\pm$0.68 & 24.07$\pm$2.99 & 26.01$\pm$0.70 & 9.71$\pm$0.28 \\
+MMEarth20K & BOLP & 39.37$\pm$0.96 & 40.86$\pm$1.38 & 30.27$\pm$0.14 & 75.93$\pm$2.18 & 5.16$\pm$0.14 & 2.18$\pm$1.05 & 23.51$\pm$2.11 & \textbf{22.84$\pm$0.96} & \textbf{8.86$\pm$0.29} \\
+MMEarth20K & DBR & 40.55$\pm$0.51 & \textbf{42.39$\pm$0.52} & \textbf{32.74$\pm$0.04} & 79.74$\pm$1.08 & 4.22$\pm$0.31 & \textbf{1.50$\pm$0.27} & 19.65$\pm$1.28 & 25.26$\pm$0.68 & 9.76$\pm$0.10 \\
+MMEarth20K & groupDRO & 39.94$\pm$0.59 & 41.40$\pm$0.82 & 31.74$\pm$0.42 & \textbf{81.45$\pm$0.31} & \textbf{4.11$\pm$0.28} & 2.53$\pm$2.29 & \textbf{17.47$\pm$0.20} & 24.15$\pm$2.30 & 10.26$\pm$0.11 \\
+\midrule
+
+% sa-crop
+sa-crop & Original ERM & 29.82$\pm$0.65 & 28.01$\pm$0.51 & 18.07$\pm$0.23 & 65.85$\pm$0.89 & 10.30$\pm$0.32 & 3.47$\pm$0.67 & 33.47$\pm$0.84 & 22.51$\pm$0.82 & 6.84$\pm$0.01 \\
+sa-crop & BOLP & \textbf{30.59$\pm$0.12} & 28.64$\pm$0.06 & 18.44$\pm$0.11 & 65.50$\pm$0.33 & 10.42$\pm$0.12 & \textbf{1.98$\pm$0.38} & 33.91$\pm$0.32 & \textbf{18.80$\pm$0.67} & \textbf{5.11$\pm$0.11} \\
+sa-crop & DBR & 30.38$\pm$0.75 & \textbf{28.79$\pm$0.46} & \textbf{19.23$\pm$0.07} & 68.31$\pm$1.02 & 9.42$\pm$0.36 & 2.83$\pm$1.00 & 31.00$\pm$1.00 & 21.13$\pm$0.33 & 6.85$\pm$0.31 \\
+sa-crop & groupDRO & 27.55$\pm$0.89 & 26.60$\pm$1.06 & 18.43$\pm$0.12 & \textbf{71.27$\pm$3.57} & \textbf{8.41$\pm$1.23} & 3.14$\pm$0.47 & \textbf{28.02$\pm$3.63} & 21.28$\pm$0.14 & 7.50$\pm$0.36 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+
+
+% ------------------------------------------------------------
+% Table 8: Biome-wise Mean and Std (SatMAE)
+% ------------------------------------------------------------
+
+\begin{table*}[h!]
+\centering
+\caption{SatMAE: Biome-wise Mean and Std (Macro F1 for classification, mIoU for segmentation) across datasets.}
+\label{tab:results_satmae_biomes_mean_std}
+
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.1}
+
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llcccccc}
+\toprule
+\textbf{Dataset} &
+\textbf{Method} &
+\textbf{High amplitude phenological} &
+\textbf{High biomass} &
+\textbf{Transitional herbaceous \& scrub} &
+\textbf{Cryospheric \& short-cycle} &
+\textbf{Hydrologically modulated} &
+\textbf{Xeric \& mineralogical} \\
+\midrule
+
+% m-EuroSAT
+m-EuroSAT & Original ERM & \textbf{93.99$\pm$0.14} & 74.45$\pm$0.51 & \textbf{93.62$\pm$0.13} & -- & -- & -- \\
+m-EuroSAT & BOLP & 91.74$\pm$0.97 & 78.41$\pm$4.76 & 85.38$\pm$3.97 & -- & -- & -- \\
+m-EuroSAT & DBR & 91.95$\pm$1.36 & 83.26$\pm$4.80 & 89.00$\pm$3.54 & -- & -- & -- \\
+m-EuroSAT & groupDRO & 90.16$\pm$1.03 & \textbf{94.87$\pm$0.00} & 90.22$\pm$1.99 & -- & -- & -- \\
+\midrule
+
+% m-BigEarthNet
+m-BigEarthNet & Original ERM & \textbf{52.06$\pm$0.22} & \textbf{47.97$\pm$3.69} & 41.33$\pm$0.36 & -- & -- & -- \\
+m-BigEarthNet & BOLP & 51.85$\pm$0.20 & 43.65$\pm$0.87 & \textbf{43.18$\pm$0.14} & -- & -- & -- \\
+m-BigEarthNet & DBR & 49.95$\pm$0.69 & 43.67$\pm$0.53 & 42.68$\pm$0.11 & -- & -- & -- \\
+m-BigEarthNet & groupDRO & 49.26$\pm$0.35 & 44.78$\pm$2.50 & 41.53$\pm$0.08 & -- & -- & -- \\
+\midrule
+
+% MMEarth20K
+MMEarth20K & Original ERM & 40.89$\pm$0.81 & 34.89$\pm$0.55 & 35.86$\pm$0.35 & 37.42$\pm$0.50 & 30.78$\pm$0.57 & 34.11$\pm$1.08 \\
+MMEarth20K & BOLP & 39.91$\pm$1.31 & 33.13$\pm$2.08 & 35.29$\pm$1.23 & 38.09$\pm$0.93 & 30.27$\pm$0.14 & 33.76$\pm$0.58 \\
+MMEarth20K & DBR & \textbf{41.07$\pm$0.61} & 35.57$\pm$0.30 & \textbf{36.84$\pm$0.29} & \textbf{38.43$\pm$0.64} & \textbf{32.74$\pm$0.04} & \textbf{34.25$\pm$0.08} \\
+MMEarth20K & groupDRO & 38.81$\pm$0.40 & \textbf{35.71$\pm$0.29} & 33.97$\pm$0.70 & 37.89$\pm$1.89 & 31.93$\pm$0.36 & 32.92$\pm$1.08 \\
+\midrule
+
+% sa-crop
+sa-crop & Original ERM & -- & -- & 27.45$\pm$0.48 & -- & -- & 18.07$\pm$0.23 \\
+sa-crop & BOLP & -- & -- & 28.15$\pm$0.07 & -- & -- & 18.44$\pm$0.11 \\
+sa-crop & DBR & -- & -- & \textbf{28.16$\pm$0.45} & -- & -- & \textbf{19.23$\pm$0.07} \\
+sa-crop & groupDRO & -- & -- & 25.93$\pm$1.17 & -- & -- & 18.43$\pm$0.12 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+
+\clearpage
+
+% DOFA MODEL TABLES
+% ============================================================
+
+\section*{DOFA}
+
+% ------------------------------------------------------------
+% Table 4: Main Results (DOFA)
+% ------------------------------------------------------------
+
+\begin{table*}[h!]
+\centering
+\caption{DOFA: Results across datasets and methods.}
+\label{tab:results_dofa}
+
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.1}
+
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lllcccccccccc}
+\toprule
+\textbf{Dataset} &
+\textbf{Method} &
+\textbf{Seed} &
+\textbf{Epoch} &
+\textbf{Val MF1} &
+\textbf{Test MF1} &
+\textbf{$M_{\text{worst}}$} &
+\textbf{PER $\uparrow$} &
+\textbf{Gini $\downarrow$} &
+\textbf{ECE $\downarrow$} &
+\textbf{NFR $\downarrow$} &
+\textbf{EOdd $\downarrow$} &
+\textbf{DPM $\downarrow$} \\
+\midrule
+
+% m-EuroSAT
+m-EuroSAT & Original ERM & seed\_0 & 47 & 95.20 & 89.05 & 68.92 & 76.97 & 5.59 & 10.69 & 25.16 & 19.90 & 11.24 \\
+m-EuroSAT & Original ERM & seed\_1 & 34 & 95.20 & 90.40 & 86.82 & 95.76 & 0.97 & 7.99 & 4.35 & 11.65 & 10.56 \\
+m-EuroSAT & Original ERM & seed\_2 & 28 & 94.89 & 89.44 & 83.92 & 93.74 & 1.43 & 13.90 & 6.42 & 10.71 & 10.36 \\
+
+m-EuroSAT & BOLP & seed\_0 & 16 & 93.51 & 83.89 & 77.12 & 88.59 & 2.74 & 11.37 & 12.32 & 14.16 & 5.62 \\
+m-EuroSAT & BOLP & seed\_1 & 33 & 94.50 & 85.23 & 76.67 & 86.50 & 3.29 & 10.79 & 14.82 & 12.11 & 6.27 \\
+m-EuroSAT & BOLP & seed\_2 & 21 & 94.89 & 84.28 & 76.62 & 88.80 & 2.61 & 13.27 & 11.75 & 11.86 & 6.84 \\
+
+m-EuroSAT & DBR & seed\_0 & 27 & 94.21 & 91.45 & 89.50 & 95.90 & 0.93 & 10.22 & 4.19 & 11.80 & 10.86 \\
+m-EuroSAT & DBR & seed\_1 & 15 & 93.70 & 91.52 & 88.48 & 96.26 & 0.85 & 11.79 & 3.83 & 9.36 & 10.69 \\
+m-EuroSAT & DBR & seed\_2 & 36 & 95.99 & 89.97 & 86.82 & 95.40 & 1.06 & 7.49 & 4.75 & 9.93 & 10.74 \\
+
+m-EuroSAT & groupDRO & seed\_0 & 28 & 94.89 & 89.50 & 88.90 & 99.70 & 0.07 & 10.70 & 0.30 & 11.19 & 10.91 \\
+m-EuroSAT & groupDRO & seed\_1 & 26 & 94.70 & 89.72 & 87.20 & 95.08 & 1.12 & 10.19 & 5.04 & 10.86 & 11.19 \\
+m-EuroSAT & groupDRO & seed\_2 & 22 & 95.49 & 88.99 & 86.72 & 97.39 & 0.59 & 12.79 & 2.64 & 17.05 & 11.03 \\
+
+\midrule
+
+% m-BigEarthNet
+m-BigEarthNet & Original ERM & seed\_0 & 46 & 56.76 & 47.28 & 37.59 & 81.11 & 4.61 & 3.57 & 20.77 & 39.35 & 12.35 \\
+m-BigEarthNet & Original ERM & seed\_1 & 45 & 56.79 & 48.29 & 38.52 & 79.69 & 4.96 & 3.94 & 22.33 & 40.33 & 11.63 \\
+m-BigEarthNet & Original ERM & seed\_2 & 40 & 56.63 & 47.46 & 37.60 & 79.17 & 5.26 & 2.90 & 23.67 & 41.00 & 13.19 \\
+
+m-BigEarthNet & BOLP & seed\_0 & 27 & 55.61 & 42.98 & 37.39 & 84.23 & 3.88 & 2.60 & 17.47 & 38.30 & 7.45 \\
+m-BigEarthNet & BOLP & seed\_1 & 36 & 56.06 & 42.48 & 35.66 & 79.18 & 5.34 & 4.32 & 24.01 & 40.39 & 7.83 \\
+m-BigEarthNet & BOLP & seed\_2 & 43 & 56.33 & 42.91 & 35.47 & 78.51 & 5.52 & 3.90 & 24.84 & 39.74 & 6.94 \\
+
+m-BigEarthNet & DBR & seed\_0 & 16 & 54.64 & 46.24 & 38.42 & 86.65 & 3.25 & 2.85 & 14.64 & 38.87 & 11.57 \\
+m-BigEarthNet & DBR & seed\_1 & 26 & 55.73 & 46.35 & 38.26 & 86.06 & 3.41 & 3.21 & 15.37 & 42.89 & 11.93 \\
+m-BigEarthNet & DBR & seed\_2 & 17 & 54.51 & 45.09 & 38.07 & 87.28 & 2.96 & 2.10 & 13.33 & 38.52 & 13.03 \\
+
+m-BigEarthNet & groupDRO & seed\_0 & 41 & 53.32 & 43.69 & 38.84 & 82.49 & 4.21 & 4.30 & 18.97 & 43.12 & 11.16 \\
+m-BigEarthNet & groupDRO & seed\_1 & 23 & 52.38 & 42.60 & 38.83 & 73.03 & 7.14 & 3.57 & 32.12 & 42.55 & 12.27 \\
+m-BigEarthNet & groupDRO & seed\_2 & 32 & 52.31 & 42.63 & 38.53 & 80.66 & 4.78 & 3.69 & 21.52 & 40.14 & 11.42 \\
+
+\midrule
+
+% MMEarth20K
+MMEarth20K & Original ERM & seed\_0 & 1 & 43.78 & 38.87 & 27.11 & 72.82 & 5.30 & 2.18 & 30.49 & 22.19 & 10.12 \\
+MMEarth20K & Original ERM & seed\_1 & 7 & 46.74 & 42.36 & 29.00 & 74.29 & 4.91 & 6.02 & 27.88 & 27.68 & 10.14 \\
+MMEarth20K & Original ERM & seed\_2 & 9 & 46.94 & 37.78 & 26.82 & 72.24 & 5.79 & 9.14 & 31.95 & 26.46 & 10.32 \\
+
+MMEarth20K & BOLP & seed\_0 & 2 & 41.74 & 38.44 & 28.89 & 73.58 & 5.75 & 4.44 & 31.20 & 25.51 & 9.79 \\
+MMEarth20K & BOLP & seed\_1 & 9 & 47.74 & 38.10 & 28.05 & 78.34 & 4.42 & 5.82 & 23.85 & 25.13 & 10.00 \\
+MMEarth20K & BOLP & seed\_2 & 6 & 43.93 & 38.05 & 27.99 & 77.00 & 5.28 & 3.20 & 26.09 & 26.30 & 10.22 \\
+
+MMEarth20K & DBR & seed\_0 & 7 & 46.47 & 42.83 & 28.98 & 73.50 & 5.01 & 5.54 & 28.77 & 27.20 & 10.17 \\
+MMEarth20K & DBR & seed\_1 & 0 & 40.47 & 37.01 & 28.62 & 79.30 & 4.88 & 5.70 & 23.01 & 20.44 & 9.70 \\
+MMEarth20K & DBR & seed\_2 & 8 & 47.23 & 36.21 & 28.02 & 80.33 & 3.91 & 12.28 & 21.41 & 18.48 & 9.37 \\
+
+MMEarth20K & groupDRO & seed\_0 & 2 & 43.66 & 40.00 & 27.53 & 74.99 & 4.55 & 0.56 & 27.13 & 22.18 & 10.75 \\
+MMEarth20K & groupDRO & seed\_1 & 9 & 46.21 & 39.65 & 28.45 & 75.05 & 5.45 & 5.65 & 27.81 & 22.13 & 10.97 \\
+MMEarth20K & groupDRO & seed\_2 & 11 & 47.79 & 38.40 & 28.46 & 79.69 & 4.60 & 9.89 & 22.13 & 21.19 & 10.22 \\
+
+\midrule
+
+% sa-crop
+sa-crop & Original ERM & seed\_0 & 5 & 32.37 & 28.70 & 20.44 & 73.55 & 7.62 & 3.00 & 30.48 & 26.94 & 5.57 \\
+sa-crop & Original ERM & seed\_1 & 27 & 34.03 & 26.52 & 19.71 & 76.60 & 6.62 & 15.54 & 26.49 & 20.28 & 5.77 \\
+sa-crop & Original ERM & seed\_2 & 37 & 34.90 & 26.98 & 19.59 & 74.72 & 7.23 & 19.48 & 28.94 & 19.66 & 5.83 \\
+
+sa-crop & BOLP & seed\_0 & 29 & 34.15 & 26.93 & 20.79 & 79.51 & 5.71 & 15.79 & 22.83 & 18.06 & 5.70 \\
+sa-crop & BOLP & seed\_1 & 8 & 33.16 & 28.00 & 20.57 & 75.82 & 6.88 & 3.80 & 27.51 & 22.17 & 5.47 \\
+sa-crop & BOLP & seed\_2 & 47 & 34.55 & 26.62 & 20.23 & 78.11 & 6.14 & 20.95 & 24.58 & 16.74 & 5.45 \\
+
+sa-crop & DBR & seed\_0 & 13 & 32.90 & 28.90 & 22.76 & 81.38 & 5.13 & 5.04 & 20.53 & 21.41 & 5.82 \\
+sa-crop & DBR & seed\_1 & 7 & 30.87 & 27.85 & 21.54 & 79.97 & 5.57 & 3.47 & 22.26 & 22.47 & 6.21 \\
+sa-crop & DBR & seed\_2 & 27 & 34.45 & 27.84 & 21.44 & 79.11 & 5.83 & 14.47 & 23.33 & 18.81 & 6.21 \\
+
+sa-crop & groupDRO & seed\_0 & 7 & 31.04 & 25.99 & 19.95 & 79.28 & 5.78 & 3.43 & 23.11 & 22.33 & 5.39 \\
+sa-crop & groupDRO & seed\_1 & 3 & 30.42 & 25.92 & 18.89 & 75.30 & 7.05 & 2.47 & 28.18 & 21.49 & 5.46 \\
+sa-crop & groupDRO & seed\_2 & 5 & 32.62 & 27.45 & 18.77 & 70.38 & 8.69 & 3.50 & 34.77 & 23.80 & 5.89 \\
+
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+
+
+% ------------------------------------------------------------
+% Table 5: Biome-wise Results (DOFA)
+% ------------------------------------------------------------
+
+\begin{table*}[h!]
+\centering
+\caption{DOFA: Biome-wise Performance (Macro F1 for classification, mIoU for segmentation) across datasets.}
+\label{tab:results_dofa_biomes}
+
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.1}
+
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lllcccccc}
+\toprule
+\textbf{Dataset} &
+\textbf{Method} &
+\textbf{Seed} &
+\textbf{High amplitude phenological} &
+\textbf{High biomass} &
+\textbf{Transitional herbaceous \& scrub} &
+\textbf{Cryospheric \& short-cycle} &
+\textbf{Hydrologically modulated} &
+\textbf{Xeric \& mineralogical} \\
+\midrule
+
+% m-EuroSAT
+m-EuroSAT & Original ERM & seed\_0 & 89.53 & 68.92 & 87.38 & -- & -- & -- \\
+m-EuroSAT & Original ERM & seed\_1 & 90.66 & 86.82 & 87.33 & -- & -- & -- \\
+m-EuroSAT & Original ERM & seed\_2 & 89.52 & 83.92 & 88.54 & -- & -- & -- \\
+
+m-EuroSAT & BOLP & seed\_0 & 87.05 & 77.67 & 77.12 & -- & -- & -- \\
+m-EuroSAT & BOLP & seed\_1 & 88.63 & 76.67 & 76.95 & -- & -- & -- \\
+m-EuroSAT & BOLP & seed\_2 & 86.29 & 84.04 & 76.62 & -- & -- & -- \\
+
+m-EuroSAT & DBR & seed\_0 & 91.63 & 93.33 & 89.50 & -- & -- & -- \\
+m-EuroSAT & DBR & seed\_1 & 91.93 & 88.48 & 88.96 & -- & -- & -- \\
+m-EuroSAT & DBR & seed\_2 & 91.01 & 86.82 & 86.99 & -- & -- & -- \\
+
+m-EuroSAT & groupDRO & seed\_0 & 88.94 & 88.90 & 89.16 & -- & -- & -- \\
+m-EuroSAT & groupDRO & seed\_1 & 89.80 & 91.71 & 87.20 & -- & -- & -- \\
+m-EuroSAT & groupDRO & seed\_2 & 89.05 & 86.72 & 87.73 & -- & -- & -- \\
+
+\midrule
+
+% m-BigEarthNet
+m-BigEarthNet & Original ERM & seed\_0 & 46.35 & 42.57 & 37.59 & -- & -- & -- \\
+m-BigEarthNet & Original ERM & seed\_1 & 48.34 & 45.03 & 38.52 & -- & -- & -- \\
+m-BigEarthNet & Original ERM & seed\_2 & 47.49 & 40.29 & 37.60 & -- & -- & -- \\
+
+m-BigEarthNet & BOLP & seed\_0 & 44.39 & 38.39 & 37.39 & -- & -- & -- \\
+m-BigEarthNet & BOLP & seed\_1 & 45.04 & 36.46 & 35.66 & -- & -- & -- \\
+m-BigEarthNet & BOLP & seed\_2 & 45.18 & 35.47 & 36.62 & -- & -- & -- \\
+
+m-BigEarthNet & DBR & seed\_0 & 44.34 & 38.47 & 38.42 & -- & -- & -- \\
+m-BigEarthNet & DBR & seed\_1 & 44.46 & 38.26 & 38.31 & -- & -- & -- \\
+m-BigEarthNet & DBR & seed\_2 & 43.11 & 43.62 & 38.07 & -- & -- & -- \\
+
+m-BigEarthNet & groupDRO & seed\_0 & 44.49 & 47.09 & 38.84 & -- & -- & -- \\
+m-BigEarthNet & groupDRO & seed\_1 & 41.93 & 53.17 & 38.83 & -- & -- & -- \\
+m-BigEarthNet & groupDRO & seed\_2 & 42.47 & 47.77 & 38.53 & -- & -- & -- \\
+
+\midrule
+
+% MMEarth20K
+MMEarth20K & Original ERM & seed\_0 & 37.23 & 33.73 & 34.74 & 35.15 & 27.11 & 31.23 \\
+MMEarth20K & Original ERM & seed\_1 & 39.03 & 34.48 & 38.69 & 37.81 & 29.00 & 36.93 \\
+MMEarth20K & Original ERM & seed\_2 & 37.13 & 32.98 & 34.47 & 32.94 & 26.82 & 29.23 \\
+
+MMEarth20K & BOLP & seed\_0 & 39.27 & 33.80 & 34.94 & 33.20 & 28.89 & 29.47 \\
+MMEarth20K & BOLP & seed\_1 & 35.80 & 32.11 & 34.88 & 33.30 & 28.05 & 30.97 \\
+MMEarth20K & BOLP & seed\_2 & 36.35 & 32.35 & 33.97 & 33.58 & 27.99 & 27.99 \\
+
+MMEarth20K & DBR & seed\_0 & 39.42 & 35.11 & 39.12 & 38.25 & 28.98 & 36.99 \\
+MMEarth20K & DBR & seed\_1 & 36.09 & 31.07 & 35.15 & 34.24 & 28.62 & 29.63 \\
+MMEarth20K & DBR & seed\_2 & 32.93 & 30.55 & 33.87 & 34.88 & 28.02 & 32.08 \\
+
+MMEarth20K & groupDRO & seed\_0 & 36.07 & 34.56 & 35.04 & 36.71 & 27.53 & 33.05 \\
+MMEarth20K & groupDRO & seed\_1 & 37.91 & 36.12 & 36.26 & 35.22 & 28.45 & 30.10 \\
+MMEarth20K & groupDRO & seed\_2 & 35.72 & 33.76 & 34.42 & 35.06 & 28.46 & 29.29 \\
+
+\midrule
+
+% sa-crop
+sa-crop & Original ERM & seed\_0 & -- & -- & 27.79 & -- & -- & 20.44 \\
+sa-crop & Original ERM & seed\_1 & -- & -- & 25.73 & -- & -- & 19.71 \\
+sa-crop & Original ERM & seed\_2 & -- & -- & 26.22 & -- & -- & 19.59 \\
+
+sa-crop & BOLP & seed\_0 & -- & -- & 26.15 & -- & -- & 20.79 \\
+sa-crop & BOLP & seed\_1 & -- & -- & 27.13 & -- & -- & 20.57 \\
+sa-crop & BOLP & seed\_2 & -- & -- & 25.90 & -- & -- & 20.23 \\
+
+sa-crop & DBR & seed\_0 & -- & -- & 27.97 & -- & -- & 22.76 \\
+sa-crop & DBR & seed\_1 & -- & -- & 26.93 & -- & -- & 21.54 \\
+sa-crop & DBR & seed\_2 & -- & -- & 27.10 & -- & -- & 21.44 \\
+
+sa-crop & groupDRO & seed\_0 & -- & -- & 25.17 & -- & -- & 19.95 \\
+sa-crop & groupDRO & seed\_1 & -- & -- & 25.08 & -- & -- & 18.89 \\
+sa-crop & groupDRO & seed\_2 & -- & -- & 26.67 & -- & -- & 18.77 \\
+
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+
+
+% ------------------------------------------------------------
+% Table 6: Mean and Std (DOFA)
+% ------------------------------------------------------------
+
+\begin{table*}[h!]
+\centering
+\caption{DOFA: Mean and Std over seeds across datasets.}
+\label{tab:results_dofa_mean_std}
+
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.1}
+
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llccccccccc}
+\toprule
+\textbf{Dataset} &
+\textbf{Method} &
+\textbf{Val MF1} &
+\textbf{Test MF1} &
+\textbf{$M_{\text{worst}}$} &
+\textbf{PER $\uparrow$} &
+\textbf{Gini $\downarrow$} &
+\textbf{ECE $\downarrow$} &
+\textbf{NFR $\downarrow$} &
+\textbf{EOdd $\downarrow$} &
+\textbf{DPM $\downarrow$} \\
+\midrule
+
+% m-EuroSAT
+m-EuroSAT & Original ERM & \textbf{95.10$\pm$0.14} & 89.63$\pm$0.57 & 79.88$\pm$7.84 & 88.82$\pm$8.42 & 2.66$\pm$2.08 & 10.86$\pm$2.41 & 11.98$\pm$9.36 & 14.09$\pm$4.13 & 10.72$\pm$0.38 \\
+m-EuroSAT & BOLP & 94.30$\pm$0.58 & 84.46$\pm$0.56 & 76.80$\pm$0.23 & 87.96$\pm$1.04 & 2.88$\pm$0.30 & 11.81$\pm$1.06 & 12.96$\pm$1.33 & 12.71$\pm$1.03 & \textbf{6.25$\pm$0.50} \\
+m-EuroSAT & DBR & 94.63$\pm$0.99 & \textbf{90.98$\pm$0.71} & \textbf{88.27$\pm$1.11} & 95.85$\pm$0.35 & 0.95$\pm$0.08 & \textbf{9.83$\pm$1.78} & 4.26$\pm$0.38 & \textbf{10.36$\pm$1.04} & 10.76$\pm$0.07 \\
+m-EuroSAT & groupDRO & 95.02$\pm$0.34 & 89.40$\pm$0.31 & 87.61$\pm$0.93 & \textbf{97.39$\pm$1.89} & \textbf{0.59$\pm$0.43} & 11.22$\pm$1.13 & \textbf{2.66$\pm$1.94} & 13.04$\pm$2.84 & 11.04$\pm$0.12 \\
+\midrule
+
+% m-BigEarthNet
+m-BigEarthNet & Original ERM & \textbf{56.72$\pm$0.07} & \textbf{47.67$\pm$0.44} & 37.90$\pm$0.44 & 79.99$\pm$0.82 & 4.95$\pm$0.26 & 3.47$\pm$0.43 & 22.25$\pm$1.19 & 40.23$\pm$0.68 & 12.39$\pm$0.63 \\
+m-BigEarthNet & BOLP & 56.00$\pm$0.30 & 42.79$\pm$0.22 & 36.18$\pm$0.86 & 80.64$\pm$2.55 & 4.91$\pm$0.73 & 3.61$\pm$0.73 & 22.11$\pm$3.29 & \textbf{39.48$\pm$0.88} & \textbf{7.40$\pm$0.37} \\
+m-BigEarthNet & DBR & 54.96$\pm$0.55 & 45.89$\pm$0.57 & 38.25$\pm$0.14 & \textbf{86.66$\pm$0.50} & \textbf{3.21$\pm$0.19} & \textbf{2.72$\pm$0.46} & \textbf{14.45$\pm$0.84} & 40.09$\pm$1.98 & 12.18$\pm$0.62 \\
+m-BigEarthNet & groupDRO & 52.67$\pm$0.46 & 42.97$\pm$0.51 & \textbf{38.74$\pm$0.14} & 78.73$\pm$4.10 & 5.38$\pm$1.27 & 3.85$\pm$0.32 & 24.20$\pm$5.69 & 41.94$\pm$1.29 & 11.62$\pm$0.47 \\
+\midrule
+
+% MMEarth20K
+MMEarth20K & Original ERM & 45.82$\pm$1.44 & \textbf{39.67$\pm$1.95} & 27.64$\pm$0.96 & 73.12$\pm$0.86 & 5.34$\pm$0.36 & 5.78$\pm$2.85 & 30.11$\pm$1.68 & 25.44$\pm$2.36 & 10.20$\pm$0.09 \\
+MMEarth20K & BOLP & 44.47$\pm$2.48 & 38.20$\pm$0.17 & 28.31$\pm$0.41 & 76.31$\pm$2.01 & 5.15$\pm$0.55 & \textbf{4.48$\pm$1.07} & 27.04$\pm$3.08 & 25.65$\pm$0.49 & 10.00$\pm$0.17 \\
+MMEarth20K & DBR & 44.72$\pm$3.02 & 38.68$\pm$2.95 & \textbf{28.54$\pm$0.40} & \textbf{77.71$\pm$3.00} & \textbf{4.60$\pm$0.49} & 7.84$\pm$3.14 & \textbf{24.39$\pm$3.16} & 22.04$\pm$3.73 & \textbf{9.75$\pm$0.33} \\
+MMEarth20K & groupDRO & \textbf{45.89$\pm$1.70} & 39.35$\pm$0.69 & 28.15$\pm$0.44 & 76.58$\pm$2.20 & 4.86$\pm$0.41 & 5.37$\pm$3.81 & 25.69$\pm$2.53 & \textbf{21.83$\pm$0.46} & 10.65$\pm$0.31 \\
+\midrule
+
+% sa-crop
+sa-crop & Original ERM & 33.77$\pm$1.05 & 27.40$\pm$0.94 & 19.91$\pm$0.38 & 74.96$\pm$1.26 & 7.16$\pm$0.41 & 12.67$\pm$7.02 & 28.64$\pm$1.64 & 22.29$\pm$3.30 & 5.72$\pm$0.11 \\
+sa-crop & BOLP & \textbf{33.96$\pm$0.58} & 27.18$\pm$0.59 & 20.53$\pm$0.23 & 77.81$\pm$1.52 & 6.24$\pm$0.48 & 13.51$\pm$7.18 & 24.97$\pm$1.93 & \textbf{18.99$\pm$2.31} & \textbf{5.54$\pm$0.11} \\
+sa-crop & DBR & 32.74$\pm$1.47 & \textbf{28.20$\pm$0.49} & \textbf{21.91$\pm$0.60} & \textbf{80.15$\pm$0.94} & \textbf{5.51$\pm$0.29} & 7.66$\pm$4.86 & \textbf{22.04$\pm$1.15} & 20.90$\pm$1.54 & 6.08$\pm$0.18 \\
+sa-crop & groupDRO & 31.36$\pm$0.93 & 26.45$\pm$0.70 & 19.20$\pm$0.53 & 74.99$\pm$3.64 & 7.17$\pm$1.19 & \textbf{3.13$\pm$0.47} & 28.69$\pm$4.77 & 22.54$\pm$0.95 & 5.58$\pm$0.22 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+
+
+% ------------------------------------------------------------
+% Table 8: Biome-wise Mean and Std (DOFA)
+% ------------------------------------------------------------
+
+\begin{table*}[h!]
+\centering
+\caption{DOFA: Biome-wise Mean and Std (Macro F1 for classification, mIoU for segmentation) across datasets.}
+\label{tab:results_dofa_biomes_mean_std}
+
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.1}
+
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llcccccc}
+\toprule
+\textbf{Dataset} &
+\textbf{Method} &
+\textbf{High amplitude phenological} &
+\textbf{High biomass} &
+\textbf{Transitional herbaceous \& scrub} &
+\textbf{Cryospheric \& short-cycle} &
+\textbf{Hydrologically modulated} &
+\textbf{Xeric \& mineralogical} \\
+\midrule
+
+% m-EuroSAT
+m-EuroSAT & Original ERM & 89.90$\pm$0.53 & 79.88$\pm$7.84 & 87.75$\pm$0.56 & -- & -- & -- \\
+m-EuroSAT & BOLP & 87.32$\pm$0.98 & 79.46$\pm$3.26 & 76.90$\pm$0.21 & -- & -- & -- \\
+m-EuroSAT & DBR & \textbf{91.52$\pm$0.38} & \textbf{89.54$\pm$2.76} & \textbf{88.49$\pm$1.08} & -- & -- & -- \\
+m-EuroSAT & groupDRO & 89.26$\pm$0.38 & 89.11$\pm$2.04 & 88.03$\pm$0.83 & -- & -- & -- \\
+\midrule
+
+% m-BigEarthNet
+m-BigEarthNet & Original ERM & \textbf{47.39$\pm$0.82} & 42.63$\pm$1.94 & 37.90$\pm$0.44 & -- & -- & -- \\
+m-BigEarthNet & BOLP & 44.87$\pm$0.34 & 36.78$\pm$1.21 & 36.56$\pm$0.71 & -- & -- & -- \\
+m-BigEarthNet & DBR & 43.97$\pm$0.61 & 40.12$\pm$2.48 & 38.27$\pm$0.14 & -- & -- & -- \\
+m-BigEarthNet & groupDRO & 42.96$\pm$1.10 & \textbf{49.34$\pm$2.72} & \textbf{38.74$\pm$0.14} & -- & -- & -- \\
+\midrule
+
+% MMEarth20K
+MMEarth20K & Original ERM & \textbf{37.80$\pm$0.87} & 33.73$\pm$0.61 & 35.97$\pm$1.93 & 35.30$\pm$1.99 & 27.64$\pm$0.96 & 32.46$\pm$3.26 \\
+MMEarth20K & BOLP & 37.14$\pm$1.52 & 32.75$\pm$0.75 & 34.60$\pm$0.45 & 33.36$\pm$0.16 & 28.31$\pm$0.41 & 29.48$\pm$1.22 \\
+MMEarth20K & DBR & 36.15$\pm$2.65 & 32.24$\pm$2.04 & \textbf{36.05$\pm$2.24} & \textbf{35.79$\pm$1.76} & \textbf{28.54$\pm$0.40} & \textbf{32.90$\pm$3.06} \\
+MMEarth20K & groupDRO & 36.56$\pm$0.96 & \textbf{34.81$\pm$0.98} & 35.24$\pm$0.77 & 35.66$\pm$0.74 & 28.15$\pm$0.44 & 30.81$\pm$1.62 \\
+\midrule
+
+% sa-crop
+sa-crop & Original ERM & -- & -- & 26.58$\pm$0.88 & -- & -- & 19.91$\pm$0.38 \\
+sa-crop & BOLP & -- & -- & 26.39$\pm$0.53 & -- & -- & 20.53$\pm$0.23 \\
+sa-crop & DBR & -- & -- & \textbf{27.33$\pm$0.46} & -- & -- & \textbf{21.91$\pm$0.60} \\
+sa-crop & groupDRO & -- & -- & 25.64$\pm$0.73 & -- & -- & 19.20$\pm$0.53 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+\end{document}

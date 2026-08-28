@@ -1,0 +1,45 @@
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.blg
+*.brf
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+*.lof
+*.lot
+*.nav
+*.snm
+*.vrb
+*.xdv
+missfont.log
+
+# Generated PDFs from local compiles (source .tex is tracked)
+rebuttal.pdf
+
+# Local TeX environment stubs / font extraction (compile helpers only)
+texmf/
+texmf_home/
+debextract/
+texlive-fonts-recommended_*.deb
+*.deb
+
+# Style-file backups from local compile workarounds
+wacv.sty.bak
+wacv.sty.orig_submit
+*.sty.bak
+*.sty.orig*
+
+# Editor / OS junk
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+.idea/
+.vscode/
+*.tmp
+*.temp

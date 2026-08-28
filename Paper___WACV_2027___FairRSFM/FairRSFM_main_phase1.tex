@@ -1,0 +1,574 @@
+\documentclass[10pt,twocolumn,letterpaper]{article}
+
+% Use official WACV template in Overleaf.
+% For review: \usepackage[review,datasets]{wacv}
+% If your author kit only provides cvpr.sty, replace wacv by cvpr.
+\usepackage[review,datasets]{wacv}
+
+\usepackage[utf8]{inputenc}
+\usepackage{times}
+\usepackage{epsfig}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{xspace}
+\usepackage{enumitem}
+\usepackage{pifont}
+\usepackage{color}
+\usepackage{array}
+\usepackage{makecell}
+\usepackage{tabularx}
+\usepackage[pagebackref,breaklinks,colorlinks]{hyperref}
+
+\newcommand{\method}{FairRSFM\xspace}
+\newcommand{\biobench}{\textsc{BiomeBench-RS}\xspace}
+\newcommand{\bbal}{\textsc{Biome-Balanced ERM}\xspace}
+\newcommand{\bdro}{\textsc{BiomeDRO}\xspace}
+\newcommand{\redtodo}[1]{\textcolor{red}{[TODO: #1]}}
+\newcommand{\cmark}{\ding{51}}
+\newcommand{\xmark}{\ding{55}}
+
+\def\wacvPaperID{2158}
+\def\confName{WACV}
+\def\confYear{2027}
+
+
+\title{FairRSFM: A Biome-Aware Benchmark and Debiasing Framework for Remote Sensing Foundation Models}
+
+% FairRSFM: A Biome-Aware Benchmark and Debiasing Framework for Remote Sensing Foundation Models
+
+\author{Anonymous WACV Submission}
+
+\begin{document}
+\maketitle
+
+% \begin{abstract}
+% Remote sensing foundation models (RSFMs) are commonly evaluated using aggregate metrics, but such scores can hide systematic performance disparities across ecological regions. We introduce \method, a biome-aware benchmark and debiasing framework for studying ecological group robustness in RSFMs. \method maps georeferenced samples from 14 terrestrial biome classes into six ecologically meaningful biome macro-groups and evaluates models under a unified frozen-backbone linear-probing protocol. The benchmark covers four representative downstream datasets: m-EuroSAT for single-label land-cover classification, m-BigEarthNet for multi-label land-cover classification, m-SA-Crop-Type for crop-type segmentation, and MMEarth20K with Dynamic World label maps for dense land-cover segmentation. Using Prithvi-EO-2.0 as a case-study RSFM across these four datasets, we show that aggregate performance hides substantial biome-dependent disparities. For example, m-EuroSAT obtains only 0.800 macro-F1 in Boreal Forests/Taiga, while m-SA-Crop-Type ranges from 0.2891 mIoU in Mediterranean regions to 0.1755 in Deserts and Xeric Shrublands. To mitigate such disparities without updating the RSFM backbone, we propose Biome-Orthogonal Linear Probing (BOLP), which removes biome-associated directions from frozen embeddings before training the task head. BOLP improves worst-group performance on m-EuroSAT from 0.800 to 0.843 and on m-BigEarthNet from 0.495 to 0.520, while also reducing cross-biome disparity measures. These results show that biome-aware evaluation can reveal ecological disparities across classification and segmentation tasks, and that BOLP can reduce such disparities in the completed classification experiments.
+% \end{abstract}
+
+\begin{abstract}
+Remote sensing foundation models (RSFMs) are commonly evaluated using aggregate metrics, which can hide systematic performance disparities across ecological regions. We introduce FairRSFM, a biome-aware benchmark for evaluating ecological group robustness in RSFMs. FairRSFM augments four downstream datasets, m-EuroSAT, m-BigEarthNet, m-SA-Crop-Type, and MMEarth20K with Dynamic World label maps, with biome metadata derived from georeferenced samples. Each sample is mapped from 14 terrestrial biome classes into six ecologically meaningful macro-groups, enabling standardized worst-group and cross-biome disparity evaluation across classification and segmentation tasks. Using Prithvi-EO-2.0 under a unified frozen-backbone linear-probing protocol, we show that aggregate performance masks substantial biome-dependent disparities. For example, m-EuroSAT reaches only 0.836 macro-F1 in the Aseasonal High-Biomass group, while m-SA-Crop-Type drops from 0.289 to 0.176 mIoU between Mediterranean regions and Deserts/Xeric Shrublands. As an illustrative mitigation baseline, Biome-Orthogonal Linear Probing improves worst-group performance from 0.836 to 0.843 on m-EuroSAT and from 0.495 to 0.520 on m-BigEarthNet without updating the RSFM backbone. FairRSFM provides a reusable benchmark and protocol for measuring ecological robustness gaps in remote sensing foundation models.
+\end{abstract}
+
+% \begin{abstract}
+% Remote sensing foundation models (RSFMs) are commonly evaluated using aggregate metrics, but such scores can hide systematic performance disparities across ecological regions. We introduce \method, a biome-aware benchmark for evaluating ecological group robustness in RSFMs. \method augments four representative downstream datasets, m-EuroSAT, m-BigEarthNet, m-SA-Crop-Type, and MMEarth20K with Dynamic World label maps, with biome-derived group metadata constructed from georeferenced samples. Each sample is mapped from 14 terrestrial biome classes into six ecologically meaningful biome macro-groups, enabling standardized evaluation of worst-group performance and cross-biome disparity across single-label classification, multi-label classification, and semantic segmentation.
+
+% The benchmark provides a unified frozen-backbone linear-probing protocol, biome-aware evaluation metrics, and baseline results for studying whether RSFM representations transfer consistently across ecological regimes. Using Prithvi-EO-2.0 as a case-study RSFM, we show that aggregate performance can mask substantial biome-dependent disparities. For example, m-EuroSAT reaches only 0.836 macro-F1 in the Aseasonal High-Biomass macro-group, while m-SA-Crop-Type drops from 0.289 mIoU in Mediterranean regions to 0.176 in Deserts and Xeric Shrublands. To demonstrate how the benchmark can support mitigation research, we also evaluate Biome-Orthogonal Linear Probing (BOLP), a representation-level intervention that removes biome-associated directions from frozen embeddings before training the task head. BOLP improves worst-group performance from 0.836 to 0.843 on m-EuroSAT and from 0.495 to 0.520 on m-BigEarthNet without updating the RSFM backbone. These results show that biome-aware benchmarking reveals ecological robustness gaps missed by aggregate evaluation and provides a reusable protocol for measuring and mitigating biome-dependent disparities in remote sensing foundation models.
+% \end{abstract}
+
+
+
+\section{Introduction}
+
+Remote sensing foundation models (RSFMs) have shown strong transferability across diverse Earth-observation tasks, including land-cover classification, crop mapping, flood segmentation, and semantic segmentation. Large pretrained encoders such as SatMAE~\cite{satmae}, Prithvi-EO-2.0~\cite{prithvi2}, DOFA~\cite{dofa}, SpectralGPT~\cite{spectralgpt}, and related RSFMs are increasingly used as general-purpose backbones for downstream remote-sensing applications. Benchmark suites such as GEO-Bench~\cite{geobench} have accelerated this trend by providing classification and segmentation tasks for systematic evaluation of pretrained models.
+
+However, most RSFM evaluations still report only aggregate dataset-level metrics such as accuracy, macro-F1, or mean intersection-over-union (mIoU). These aggregate metrics answer whether a model performs well \emph{on average}, but they do not reveal whether the model performs consistently across ecological regions. This is a critical issue for remote sensing because Earth-observation data are spatially and ecologically structured: the appearance of the same semantic class can change substantially across forests, grasslands, deserts, Mediterranean ecosystems, boreal regions, and agricultural landscapes. A model may therefore achieve high average accuracy while underperforming in specific ecological regions that are visually, climatically, or geographically under-represented. This omission matters in practice because geospatial models can degrade substantially under realistic natural distribution shifts, including geographic, sensor, scale, and source changes~\cite{rolf2023evaluation,earthshift2026}.
+
+
+We focus on \textbf{biome bias}, which we define as systematic disparity in RSFM downstream performance across biome-derived ecological groups. A biome is a large ecological region characterized by similar climate, vegetation, and environmental conditions. To measure this bias, we assign each georeferenced sample to a biome label using its geographic coordinates and an external terrestrial ecoregion reference map~\cite{terrestrialecoregions,ecoregions2017}. We then evaluate model performance separately within each biome-derived group rather than only reporting a single aggregate dataset-level score. This converts standard RSFM transfer evaluation into a group-robustness problem, where poor worst-group performance can indicate representational bias of the foundation model in specific ecological regimes.
+
+Although the reference taxonomy contains 14 terrestrial biome classes, directly using all 14 classes as fairness groups can be unstable for downstream datasets with limited or uneven biome coverage. We therefore adopt a two-level grouping strategy. Each sample is first mapped to one of the 14 raw terrestrial biome labels and then consolidated into six biome macro-groups reflecting broad spectral, phenological, hydrological, cryospheric, and surface-property regimes. These groups correspond to aseasonal high-biomass regions, high-amplitude phenological forests, transitional herbaceous and scrub landscapes, cryospheric and short-cycle regions, xeric and mineralogical surfaces, and hydrologically modulated ecosystems. This design preserves ecological interpretability while providing more reliable group-wise estimates for fairness evaluation and debiasing.
+
+To address this gap, we introduce \method, a biome-aware benchmark and debiasing framework for evaluating ecological group robustness in remote sensing foundation models. Our benchmark design is inspired by GEO-Bench but differs in objective. GEO-Bench was designed to evaluate foundation models across a diverse set of Earth-monitoring tasks, including classification and segmentation datasets~\cite{geobench}. In contrast, \method uses three selected GEO-Bench tasks together with an MMEarth20K Dynamic World segmentation subset to ask a different question: \emph{Do RSFMs generalize fairly across biome-derived ecological groups?} This question is particularly important for global Earth-observation deployment, where a model trained or evaluated mostly on dominant ecological regimes may fail in less represented regions.
+
+Beyond diagnosis, \method also includes a biome-aware debiasing framework under the same frozen-backbone linear-probing protocol. We use biome-balanced ERM as a simple mitigation baseline and define stronger biome-aware strategies, including  Dynamic Biome Reweighting with Validation Feedback (DBR), and Biome-Orthogonal Linear Probing (BOLP). BOLP removes biome-associated directions from frozen RSFM embeddings before training the task head, providing a representation-level debiasing strategy. This allows us to analyze whether biome-dependent disparities can be reduced without full backbone fine-tuning.
+
+Our main contributions are as follows:
+\begin{itemize}[leftmargin=*]
+    \item We introduce \method, a biome-aware benchmark and debiasing framework for studying ecological group robustness in remote sensing foundation models across four classification and segmentation datasets.
+
+    \item We propose a biome-labeling pipeline that first assigns georeferenced samples to the 14 terrestrial biome classes and then groups them into six biome macro-groups reflecting spectral, phenological, hydrological, cryospheric, and surface-property regimes.
+
+    \item We evaluate Prithvi-EO-2.0 using a unified frozen-backbone linear-probing protocol and report both standard task metrics and biome-aware robustness measures, showing that strong aggregate performance can hide substantial biome-dependent disparities.
+        
+    \item We develop a set of biome-aware mitigation strategies, including Dynamic Biome Reweighting with Validation Feedback (DBR), and Biome-Orthogonal Linear Probing (BOLP), and empirically evaluate BOLP as our main representation-level debiasing method.
+\end{itemize}
+
+\section{Related Work}
+
+\noindent\textbf{Remote sensing foundation models.} RSFMs learn transferable representations from large-scale Earth observation via self-supervised pretraining on multispectral, temporal, and multimodal imagery~\cite{rsfm_survey_multimodal}. These span masked-autoencoding models such as SatMAE~\cite{satmae}, Scale-MAE~\cite{scalemae}, and SatMAE++~\cite{satmaepp}; contrastive and hybrid objectives such as CROMA~\cite{croma} and SoftCon~\cite{softcon}; and recent broad-coverage models including Prithvi-EO-2.0~\cite{prithvi2}, DOFA~\cite{dofa}, SpectralGPT~\cite{spectralgpt}, and SkySense~\cite{skysense}. These models are commonly evaluated with aggregate metrics such as accuracy, macro-F1, or mIoU, which cannot reveal whether performance holds consistently across ecological regions; \method targets this gap.
+
+\smallskip
+\noindent\textbf{Remote sensing benchmarks.} Standardized suites have driven RSFM evaluation: GEO-Bench~\cite{geobench} provides harmonized classification and segmentation tasks, from which we use m-EuroSAT, m-BigEarthNet, and m-SA-Crop-Type; we further include MMEarth20K, a subset of MMEarth~\cite{mmearth} with Dynamic World~\cite{dynamicworld} label maps, to increase dense land-cover segmentation coverage. PANGAEA~\cite{pangaea} broadens geospatial foundation-model evaluation across tasks, resolutions, and geographies. Widely used operational datasets include BigEarthNet~\cite{bigearthnet,bigearthnetmm}, MMEarth~\cite{mmearth}, and Dynamic World~\cite{dynamicworld}. Recent work has quantified remote-sensing dataset bias through size, angle, class, density, and scene factors using diversity- and evenness-based indices~\cite{rsd_biaseval}. Existing benchmarks usually summarize each dataset with a single aggregate score and do not test whether performance holds across ecological regions within the dataset. \method reuses this ecosystem for a complementary purpose: measuring how RSFM performance varies across biome-derived groups.
+
+\smallskip
+\noindent\textbf{Fairness, group robustness, and representation debiasing.} Fairness evaluation compares behavior across groups rather than population-level averages~\cite{fairnesssurvey}, since a model can score well on average yet fail on under-represented groups, motivating worst-group and GroupDRO-style objectives~\cite{groupdro,wilds}. These concerns are acute in remote sensing, yet the field lacks a domain-appropriate notion of groups; we use biomes because they are globally defined, ecologically meaningful, and tightly tied to land-cover appearance, climate, and surface conditions. In this sense, biome groups act as ecologically meaningful analysis groups for subgroup-error evaluation under distribution shift~\cite{hardt2016equality,woodworth2017learning,shao2024fairnessshift}. Bias mitigation for RSFMs remains nascent, limited to parameter-efficient tuning~\cite{yin2025remote} and LoRA-based debiasing under long-tailed data (debLoRA)~\cite{deblora}, while more general representation debiasing removes attribute-associated directions from embeddings~\cite{bolukbasi2016man,ravfogel2020null}. Our Biome-Orthogonal Linear Probing (BOLP) brings this idea to ecological bias, removing biome directions from frozen embeddings in closed form without backbone fine-tuning or adapters.
+
+
+\begin{figure*}
+    \centering
+    \includegraphics[width=0.95\linewidth]{overall.pdf}
+    % \caption{Overview of the \method benchmark and debiasing framework. Georeferenced samples are first mapped from 14 terrestrial biome classes to six ecologically meaningful macro-groups. A frozen RSFM backbone produces embeddings that are evaluated under a unified linear-probing protocol on classification and segmentation tasks. Biome-Orthogonal Linear Probing (BOLP) removes biome-associated directions from the frozen features before training the task head. Both standard task metrics and group-robustness measures (worst-group performance, normalized performance range, equalized odds difference, etc.) are reported to diagnose and mitigate ecological disparities.}
+    \caption{Overview of \method. Georeferenced samples are mapped from 14 terrestrial biomes to six macro-groups and evaluated under a frozen-backbone linear-probing protocol. Biome-Orthogonal Linear Probing (BOLP) removes biome-associated directions from RSFM embeddings before training the task head.}
+    \label{fig:main}
+\end{figure*}
+
+\section{FairRSFM Benchmark}
+
+\subsection{Task Families and Datasets}
+
+\method contains two application families: \textbf{classification} and \textbf{semantic segmentation}. Classification tasks evaluate whether frozen RSFM features are discriminative for patch-level labels, while segmentation tasks evaluate whether RSFM representations support dense prediction under biome-derived ecological variation. Table~\ref{tab:datasets} summarizes the four-dataset benchmark suite. We use three GEO-Bench tasks covering single-label classification, multi-label classification, and crop-type segmentation, and add an MMEarth20K subset with Dynamic World label maps to increase dense land-cover segmentation diversity.
+
+\begin{table*}[t]
+\centering
+\caption{\method dataset suite. GEO-Bench datasets are selected for classification and segmentation; the MMEarth20K subset increases dense land-cover segmentation diversity. Sample counts for GEO-Bench tasks follow the modified benchmark setting.}
+\label{tab:datasets}
+\scalebox{0.9}{
+\begin{tabular}{l l c c c c l}
+\toprule
+Dataset & Task & Classes & Train & Val & Test & Notes \\
+\midrule
+m-EuroSAT~\cite{geobench} & Classification & 10 & 2,000 & 1,000 & 1,000 & Sentinel-2, land cover \\
+m-BigEarthNet~\cite{geobench,bigearthnet} & Multi-label classification & 43 & 20,000 & 1,000 & 1,000 & Sentinel-2, multi-label land cover \\
+m-SA-Crop-Type~\cite{geobench} & Segmentation & 10 & 3,000 & 1,000 & 1,000 & Sentinel-2, crop type \\
+MMEarth20K~\cite{mmearth,dynamicworld} & Segmentation & 9 & 16,000 & 2,000 & 2,000 & Dynamic World label maps \\
+\bottomrule
+\end{tabular}
+}
+\end{table*}
+
+For MMEarth20K, we use a 20,000-sample subset with Dynamic World-derived 10\,m land-cover label maps. The subset is split into 16,000 training samples, 2,000 validation samples, and 2,000 test samples, enabling biome-aware dense land-cover evaluation under the same frozen-backbone protocol.
+
+
+\subsection{Biome Label Construction}
+The central grouping variable in \method is derived from terrestrial biome information. We use the 14-biome taxonomy from global terrestrial ecoregion products~\cite{terrestrialecoregions,ecoregions2017}. For each georeferenced sample, we compute the patch centroid and spatially join it with an external biome reference map. The resulting raw biome ID is stored as image-level metadata. For segmentation datasets, the entire patch is assigned a biome label based on its centroid, which keeps the grouping protocol consistent across classification and dense prediction tasks.
+
+Directly using all 14 raw biome classes as fairness groups can be unstable for downstream datasets with limited or uneven biome coverage. Therefore, \method uses a two-level grouping strategy. Each sample is first assigned a raw biome label \(b_i\in\{1,\ldots,14\}\), and the raw label is then mapped to a biome macro-group \(g_i\in\{1,\ldots,6\}\). The six macro-groups are designed to reflect broad spectral, phenological, hydrological, cryospheric, and surface-property regimes. They are used as the primary groups for fairness evaluation and debiasing, while the original 14 biome labels are retained for fine-grained analysis when sufficient samples are available.
+
+% \begin{table*}[t]
+% \centering
+% \caption{Mapping from 14 terrestrial biome classes to six biome macro-groups used for primary fairness evaluation and debiasing in \method.}
+% \label{tab:biome_macro_groups}
+% \resizebox{\textwidth}{!}{
+% \begin{tabular}{c l l l}
+% \toprule
+% Group ID & Biome macro-group & Included raw biome classes & Rationale \\
+% \midrule
+% 1 & Aseasonal High-Biomass &
+% 1 Tropical Moist Forests; 3 Tropical Conifer Forests; 5 Temperate Conifer Forests &
+% Dense, high-biomass vegetation with relatively persistent canopy structure. \\
+
+% 2 & High-Amplitude Phenological &
+% 2 Tropical Dry Forests; 4 Temperate Broadleaf and Mixed Forests; 6 Boreal Forests/Taiga &
+% Forested regions with strong seasonal or phenological variation. \\
+
+% 3 & Transitional Herbaceous and Scrub &
+% 7 Tropical and Subtropical Grasslands, Savannas and Shrublands; 8 Temperate Grasslands, Savannas and Shrublands; 12 Mediterranean Forests, Woodlands and Scrub &
+% Open or mixed vegetation regimes with strong grass, shrub, soil, and canopy heterogeneity. \\
+
+% 4 & Cryospheric and Short-Cycle &
+% 10 Montane Grasslands and Shrublands; 11 Tundra &
+% Temperature-restricted ecosystems with short growing periods or cryospheric influence. \\
+
+% 5 & Xeric and Mineralogical &
+% 13 Deserts and Xeric Shrublands &
+% Vegetation-sparse surfaces dominated by albedo, exposed soil, and mineral background. \\
+
+% 6 & Hydrologically Modulated &
+% 9 Flooded Grasslands and Savannas; 14 Mangroves &
+% Water-influenced ecosystems where inundation strongly affects spectral response. \\
+% \bottomrule
+% \end{tabular}}
+% \end{table*}
+
+\begin{table*}[t]
+\centering 
+\footnotesize
+% \setlength{\tabcolsep}{5pt}
+% \renewcommand{\arraystretch}{1.15}
+% \scalebox{0.8}{
+\caption{Mapping from 14 terrestrial biome classes to six biome macro-groups used for primary fairness evaluation and debiasing in \method.}
+\label{tab:biome_macro_groups}
+\begin{tabularx}{\textwidth}{@{} c l
+  >{\hsize=1.14\hsize\raggedright\arraybackslash}X
+  >{\hsize=0.86\hsize\raggedright\arraybackslash}X @{}}
+\toprule
+\textbf{ID} & \textbf{Biome macro-group} & \textbf{Included raw biome classes} & \textbf{Rationale} \\
+\midrule
+1 & Aseasonal High-Biomass &
+1 Tropical Moist Forests; 3 Tropical Conifer Forests; 5 Temperate Conifer Forests &
+Dense, high-biomass vegetation with relatively persistent canopy structure. \\
+\addlinespace[2pt]
+2 & High-Amplitude Phenological &
+2 Tropical Dry Forests; 4 Temperate Broadleaf and Mixed Forests; 6 Boreal Forests/Taiga &
+Forested regions with strong seasonal or phenological variation. \\
+\addlinespace[2pt]
+3 & Transitional Herbaceous and Scrub &
+7 Tropical and Subtropical Grasslands, Savannas and Shrublands; 8 Temperate Grasslands, Savannas and Shrublands; 12 Mediterranean Forests, Woodlands and Scrub &
+Open or mixed vegetation regimes with strong grass, shrub, soil, and canopy heterogeneity. \\
+\addlinespace[2pt]
+4 & Cryospheric and Short-Cycle &
+10 Montane Grasslands and Shrublands; 11 Tundra &
+Temperature-restricted ecosystems with short growing periods or cryospheric influence. \\
+\addlinespace[2pt]
+5 & Xeric and Mineralogical &
+13 Deserts and Xeric Shrublands &
+Vegetation-sparse surfaces dominated by albedo, exposed soil, and mineral background. \\
+\addlinespace[2pt]
+6 & Hydrologically Modulated &
+9 Flooded Grasslands and Savannas; 14 Mangroves &
+Water-influenced ecosystems where inundation strongly affects spectral response. \\
+\bottomrule
+\end{tabularx}
+% }
+\end{table*}
+
+
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=\linewidth]{macro_group_distribution.png}
+    \caption{Quantitative sample distribution of the curated MMEarth20K subset across the six macro ecological groups and corresponding data splits (80\% Train, 10\% Val, 10\% Test). The dataset enforces a controlled inter-group imbalance to evaluate model robustness, while maintaining uniform intra-group biome frequencies.}
+    \label{fig:macro_group_dist}
+\end{figure}
+
+% \begin{figure}
+%     \centering
+%     \includegraphics[width=1\linewidth]{Construction.pdf}
+%     \caption{Enter Caption}
+%     \label{fig:placeholder}
+% \end{figure}
+
+Unknown, water-only, or unmatched samples are reported separately and are not used for the primary worst-group score unless explicitly stated. Some datasets cover only a subset of the six macro-groups, and therefore all fairness metrics are computed over the set of matched macro-groups present in each dataset split.
+
+% \vspace{-0.5em}
+
+\subsection{Biome Metadata Schema}
+
+Each sample is associated with the following metadata: $(x_i, y_i, d_i, \ell_i, b_i, g_i),$ where \(x_i\) is the input image, \(y_i\) is the class label or segmentation mask, \(d_i\) is the dataset name, \(\ell_i=(\mathrm{lat}_i,\mathrm{lon}_i)\) is the sample location, \(b_i\in\{1,\ldots,14\}\) is the raw terrestrial biome label, and \(g_i\in\{1,\ldots,6\}\) is the derived biome macro-group label. The macro-group is obtained through a deterministic mapping \(g_i=\psi(b_i)\), where \(\psi\) is defined in Table~\ref{tab:biome_macro_groups}. For single-label classification, \(y_i\in\{1,\ldots,C\}\); for multi-label classification, \(y_i\in\{0,1\}^{C}\); and for segmentation, \(y_i \in \{1,\ldots,C\}^{H\times W}\).
+
+The raw biome label \(b_i\) enables fine-grained ecological analysis, while the macro-group label \(g_i\) is used for the primary fairness metrics and mitigation methods. This separation allows \method to preserve ecological detail without making the primary robustness analysis overly sensitive to sparse biome classes.
+
+% \subsection{Evaluation Metrics}
+
+% Let \(\mathcal{G}_d\) denote the set of matched biome macro-groups present in dataset \(d\), and let \(M_g\) be the task-specific metric computed on macro-group \(g\). Unless otherwise stated, all group-wise fairness metrics are computed over \(\mathcal{G}_d\). Raw 14-biome results can also be reported as a fine-grained diagnostic when enough samples are available.
+
+% \textbf{Classification.} For single-label classification, we report macro-F1 and balanced accuracy. For multi-label classification such as m-BigEarthNet, we report macro-F1 at per-class optimal thresholds, denoted F1@opt, and mAP where available. Group-wise macro-F1 is computed over samples belonging to each biome macro-group. When necessary, per-group macro-F1 is computed only over classes present in that group to avoid penalizing an ecological group for naturally absent land-cover categories.
+
+% \textbf{Segmentation.} For segmentation, we report global mIoU and group-wise mIoU. Each image patch is assigned to a biome macro-group using its centroid. For each macro-group \(g\),
+% \begin{equation}
+% \mathrm{mIoU}_g = \frac{1}{C_g}\sum_{c\in C_g}\frac{\mathrm{TP}_{g,c}}{\mathrm{TP}_{g,c}+\mathrm{FP}_{g,c}+\mathrm{FN}_{g,c}},
+% \end{equation}
+% where \(C_g\) is the set of classes present in macro-group \(g\).
+
+% \textbf{Worst-group metric.}
+% \begin{equation}
+% M_{\mathrm{worst}} = \min_{g\in\mathcal{G}_d} M_g.
+% \end{equation}
+
+% \textbf{Normalized performance range.}
+% \begin{equation}
+% \mathrm{NFR}=\frac{\max_{g\in\mathcal{G}_d}M_g-\min_{g\in\mathcal{G}_d}M_g}{\frac{1}{|\mathcal{G}_d|}\sum_{g\in\mathcal{G}_d}M_g+\epsilon}.
+% \end{equation}
+
+% \textbf{Group standard deviation.}
+% \begin{equation}
+% \sigma_{\mathrm{group}} = \sqrt{\frac{1}{|\mathcal{G}_d|}\sum_{g\in\mathcal{G}_d}\left(M_g-\bar{M}\right)^2},
+% \end{equation}
+% where \(\bar{M}=\frac{1}{|\mathcal{G}_d|}\sum_{g\in\mathcal{G}_d}M_g\).
+
+% \textbf{Equalized odds difference.} For classification, we compute one-vs-rest TPR and FPR for each class and compare them across macro-group pairs:
+% \begin{equation}
+% \mathrm{EOdd}=\max_{g,g',c}\frac{1}{2}\left(|\mathrm{TPR}_{g,c}-\mathrm{TPR}_{g',c}|+|\mathrm{FPR}_{g,c}-\mathrm{FPR}_{g',c}|\right).
+% \end{equation}
+
+% \textbf{Demographic parity measure.} DPM measures the maximum cross-group prediction-rate difference. For single-label classification, \(\hat{y}_c\) denotes the indicator that class \(c\) is predicted; for multi-label classification, it denotes the predicted positive indicator for class \(c\):
+% \begin{equation}
+% \mathrm{DPM}=\max_{g,g',c}\left|P(\hat{y}_c=1\mid g)-P(\hat{y}_c=1\mid g')\right|.
+% \end{equation}
+
+\subsection{Evaluation Metrics}
+Let $\mathcal{G}_d$ be the set of matched biome macro-groups present in dataset $d$ and $M_g$ the task-specific metric on group $g$. Unless stated otherwise, every group-wise quantity below, including all $\min$, $\max$, and averages over $g$, ranges over $\mathcal{G}_d$; raw 14-biome scores are reported as a fine-grained diagnostic when sample counts allow.
+
+\smallskip
+\textbf{Per-task metrics.} For single-label classification we report macro-F1 and balanced accuracy; for multi-label classification (e.g., m-BigEarthNet) we report macro-F1 at per-class optimal thresholds (F1@opt) and mAP where available. Per-class thresholds for F1@opt are selected on the validation split and then fixed for test evaluation. Group-wise macro-F1 is computed over the samples of each macro-group, and when necessary restricted to the classes present in that group so a group is not penalized for naturally absent land-cover categories. For segmentation we report global and group-wise mIoU, assigning each patch to a macro-group by its centroid:
+\begin{equation}
+\mathrm{mIoU}_g = \frac{1}{|C_g|}\sum_{c\in C_g}\frac{\mathrm{TP}_{g,c}}{\mathrm{TP}_{g,c}+\mathrm{FP}_{g,c}+\mathrm{FN}_{g,c}},
+\end{equation}
+where $C_g$ is the set of classes present in group $g$.
+
+\smallskip
+\textbf{Disparity summaries.} From the per-group scores $\{M_g\}$ we report the worst-group score $M_{\mathrm{worst}}=\min_g M_g$, the normalized performance range $\mathrm{NFR}=(\max_g M_g-\min_g M_g)/(\bar M+\epsilon)$, and the group standard deviation $\sigma_{\mathrm{group}}=\big[\,|\mathcal{G}_d|^{-1}\sum_g (M_g-\bar M)^2\,\big]^{1/2}$, with $\bar M=|\mathcal{G}_d|^{-1}\sum_g M_g$.
+
+\smallskip
+\textbf{Group fairness (classification).}
+Our group-fairness metrics follow standard group-comparative fairness criteria, including equalized-odds-style error-rate gaps and demographic-parity-style prediction-rate gaps~\cite{hardt2016equality,woodworth2017learning}. We report two pairwise disparity measures. The equalized-odds difference (EOdd) compares one-vs-rest true-positive and false-positive rates across biome groups and classes, while the demographic-parity measure (DPM) computes the maximum cross-group difference in prediction rates. Here, $\hat{y}_c$ denotes whether class $c$ is predicted in the single-label setting or predicted positive in the multi-label setting:
+\begin{align}
+\mathrm{EOdd} &= \max_{g,g',c}\tfrac{1}{2}\big(|\mathrm{TPR}_{g,c}-\mathrm{TPR}_{g',c}|\notag\\
+&\quad+|\mathrm{FPR}_{g,c}-\mathrm{FPR}_{g',c}|\big),\\
+\mathrm{DPM} &= \max_{g,g',c}\big|P(\hat{y}_c=1\mid g)-P(\hat{y}_c=1\mid g')\big|.
+\end{align}
+
+
+% \section{Biome-Aware Debiasing Framework}
+
+% Let $\mathcal{D}_{\mathrm{tr}}=\{(x_i,y_i,g_i)\}_{i=1}^{N}$ be the training set with input image $x_i$, task label $y_i$, and biome macro-group label $g_i\in\mathcal{G}$ (Table~\ref{tab:biome_macro_groups}). Let $\phi:X\rightarrow\mathbb{R}^{d}$ be a frozen RSFM encoder and $z_i=\phi(x_i)$ the frozen representation. Every strategy below keeps $\phi$ fixed and trains only the downstream head $h_\theta$, so any change in fairness or robustness is attributable to the mitigation rather than to backbone fine-tuning. The task loss $\ell$ is cross-entropy for single-label classification, binary cross-entropy for multi-label classification, and a pixel- or decoder-level loss for segmentation.
+
+% \begin{equation}
+% w_g=\frac{1/p_g}{\frac{1}{|\mathcal{G}|}\sum_{g'\in\mathcal{G}}1/p_{g'}}\label{eq:wg}
+% \end{equation}
+
+% \subsection{Dynamic Biome Reweighting with Validation Feedback}
+% Static weights are fixed from the training distribution, yet the most under-represented group is not always the worst-performing one during training. Dynamic Biome Reweighting (DBR) therefore initializes $w^{(0)}_g$ to the static weights of Eq.~\eqref{eq:wg} and adapts them from validation feedback. Every $K$ epochs the current model is evaluated per group; let $M_g^{(t)}$ be the group-$g$ validation metric at update step $t$ (macro-F1 for classification, mIoU for segmentation) and $\bar{M}^{(t)}=\frac{1}{|\mathcal{G}|}\sum_{g}M_g^{(t)}$ its mean. DBR raises the weight of below-mean groups and lowers it for above-mean groups, then renormalizes to unit average:
+% \begin{align}
+% \tilde{w}^{(t+1)}_g&=w^{(t)}_g\!\left(1+\alpha\,\frac{\bar{M}^{(t)}-M_g^{(t)}}{\bar{M}^{(t)}+\epsilon}\right),\\
+% w^{(t+1)}_g&=\frac{\tilde{w}^{(t+1)}_g}{\frac{1}{|\mathcal{G}|}\sum_{g'}\tilde{w}^{(t+1)}_{g'}}.
+% \end{align}
+% Here, $\alpha$ controls feedback strength and $\epsilon$ ensures numerical stability. The objective reuses the reweighted form with the current weights, $\mathcal{L}_{\mathrm{DBR}}=\frac{1}{N}\sum_{i}w^{(t)}_{g_i}\,\ell(h_\theta(\phi(x_i)),y_i)$. DBR maintains only a small dictionary of group weights, reuses validation metrics already computed for fairness evaluation, and is non-adversarial, parameter-free, and applicable to single-label, multi-label, and segmentation tasks.
+\section{Biome-Aware Debiasing Framework}
+
+Let \(\mathcal{D}_{\mathrm{tr}}=\{(x_i,y_i,g_i)\}_{i=1}^{N}\) be the training set with input image \(x_i\), task label \(y_i\), and biome macro-group label \(g_i\in\mathcal{G}\) (Table~\ref{tab:biome_macro_groups}). Let \(\phi:X\rightarrow\mathbb{R}^{d}\) be a frozen RSFM encoder and \(z_i=\phi(x_i)\) the frozen representation. Every strategy below keeps \(\phi\) fixed and trains only the downstream head \(h_\theta\), so any change in fairness or robustness is attributable to the mitigation rather than to backbone fine-tuning. The task loss \(\ell\) is cross-entropy for single-label classification, binary cross-entropy for multi-label classification, and a pixel- or decoder-level loss for segmentation.
+
+\subsection{Dynamic Biome Reweighting with Validation Feedback}
+
+We use Dynamic Biome Reweighting with Validation Feedback (DBR) as our loss-level mitigation strategy. DBR initializes group weights from a static inverse-frequency scheme and then adapts them dynamically during training according to per-group validation performance.
+
+Let \(p_g = n_g / N\) be the empirical frequency of biome macro-group \(g\). DBR initializes the normalized weights as
+\begin{equation}
+w_g^{(0)}=\frac{1/p_g}{\frac{1}{|\mathcal{G}|}\sum_{g'\in\mathcal{G}}1/p_{g'}}\label{eq:wg}.
+\end{equation}
+
+Static weights alone are fixed from the training distribution, yet the most under-represented group is not always the worst-performing one. Therefore, every \(K\) epochs the current model is evaluated separately on each biome macro-group. Let \(M_g^{(t)}\) be the validation metric for group \(g\) at update step \(t\) (macro-F1 for classification, mIoU for segmentation) and \(\bar{M}^{(t)}=\frac{1}{|\mathcal{G}|}\sum_g M_g^{(t)}\) its mean. DBR increases the weight of groups performing below the mean and decreases it for groups performing above the mean, then renormalizes to preserve unit average:
+\begin{align}
+\tilde{w}^{(t+1)}_g &= w^{(t)}_g \left(1 + \alpha \frac{\bar{M}^{(t)} - M_g^{(t)}}{\bar{M}^{(t)} + \epsilon}\right), \\
+w^{(t+1)}_g &= \frac{\tilde{w}^{(t+1)}_g}{\frac{1}{|\mathcal{G}|}\sum_{g'} \tilde{w}^{(t+1)}_{g'}}.
+\end{align}
+Here, \(\alpha\) controls feedback strength and \(\epsilon\) ensures numerical stability. The training objective reuses the current weights:
+\begin{equation}
+\mathcal{L}_{\mathrm{DBR}} = \frac{1}{N} \sum_{i=1}^N w^{(t)}_{g_i} \, \ell(h_\theta(\phi(x_i)), y_i).
+\end{equation}
+DBR is lightweight, reuses validation metrics already computed for fairness evaluation, is non-adversarial and parameter-free, and applies to single-label classification, multi-label classification, and segmentation tasks.
+
+\subsection{Biome-Orthogonal Linear Probing}
+Biome-Orthogonal Linear Probing (BOLP), our main representation-level method, acts on the geometry of the frozen embeddings rather than the loss. It is a closed-form module inserted between the frozen encoder and the linear head that removes biome-associated directions while preserving task-relevant variance.
+
+\textbf{Precomputation.} For each group we form the centroid $\mu_g=\frac{1}{n_g}\sum_{i:g_i=g}z_i$, their mean $\mu_0=\frac{1}{|\mathcal{G}|}\sum_{g}\mu_g$, and the centered group-mean matrix
+\begin{equation}
+B=\left[\mu_{1}-\mu_{0},\;\ldots,\;\mu_{|\mathcal{G}|}-\mu_{0}\right]\in\mathbb{R}^{d\times|\mathcal{G}|}.
+\end{equation}
+From the thin SVD $B=U\Sigma V^{\top}$, the top $k$ left singular vectors $U_k\in\mathbb{R}^{d\times k}$ span the dominant inter-group mean-difference directions. Because the columns of $B$ sum to zero, at most $|\mathcal{G}|-1$ directions are non-trivial; hence, $k\le|\mathcal{G}|-1$. The projector onto their orthogonal complement is $P_k=I_d-U_kU_k^{\top}$. The buffers $\{\mu_g\}$, $\mu_0$, and $P_k$ are computed once on the training set and frozen.
+
+\textbf{Debiasing transform.} For a sample with group label $g_i$, BOLP removes the first-order group-mean shift and projects out the biome-discriminative subspace,
+\begin{equation}
+\hat{z}_i=P_k\big(z_i-\mu_{g_i}+\mu_0\big),
+\end{equation}
+so $\hat{z}_i$ is recentered to a common reference (preserving the global feature scale) and lies in the orthogonal complement of the top inter-group mean-difference subspace.
+
+\textbf{Linear probing.} The head is trained with the standard linear-probing objective on the debiased features, $\mathcal{L}_{\mathrm{BOLP}}=\frac{1}{N}\sum_{i}\ell(h_\theta(\hat{z}_i),y_i)$, with only $\theta$ trainable. At inference the same transform is applied when the group label is available; in georeferenced remote-sensing evaluation, this label can be obtained from the same coordinate-to-biome lookup used during preprocessing. If the group label is missing, the residualization is skipped and the global projector $P_k$ is still applied. BOLP adapts representation-debiasing and null-space projection~\cite{bolukbasi2016man,ravfogel2020null} to ecological group bias in frozen remote-sensing embeddings; unlike adapter- or LoRA-based mitigation it adds no trainable parameters and leaves the RSFM backbone unchanged.
+
+\smallskip
+\noindent\textbf{Method Comparison}
+The two primary mitigation strategies evaluated in this work intervene at different stages of the frozen-backbone linear-probing pipeline. DBR operates at the loss level, dynamically adjusting biome macro-group weights each validation epoch based on per-group performance feedback. BOLP performs representation-level debiasing directly in the frozen embedding space: it first recenters each sample to remove group-mean shifts and then projects out the dominant inter-group directions via a closed-form null-space projection. Both methods retain the full training set and introduce no extra trainable parameters beyond the task head.
+
+
+
+\section{Experiments}
+
+\noindent \textbf{Experimental Protocol}
+We evaluate \method under a unified frozen-backbone linear-probing protocol using Prithvi-EO-2.0 300M TL as the frozen remote sensing foundation model. The encoder backbone is kept fixed, and only the task-specific decoder or prediction head is trained. This protocol isolates the quality and biome robustness of the pretrained representation because the backbone parameters are not updated during downstream training.
+
+The completed experiments cover four downstream datasets: m-EuroSAT for single-label land-cover classification, m-BigEarthNet for multi-label land-cover classification, m-SA-Crop-Type for crop-type segmentation, and MMEarth20K for Dynamic World-based dense land-cover segmentation. For each dataset, we report both the standard task metric and group-wise metrics computed over the matched biome-derived groups. Unknown, water-only, or unmatched samples are reported separately when available and are excluded from the primary worst-group and disparity summaries unless explicitly stated.
+
+The current completed runs use Prithvi-EO-2.0 as a case-study RSFM. The same protocol supports evaluation of additional RSFMs such as SatMAE++, SoftCon, DOFA, and SpectralGPT.
+
+\noindent \textbf{Implementation Details} Table~\ref{tab:training_config} summarizes the linear-probing setup used for the Prithvi-EO-2.0 experiments.
+
+\begin{table}[t]
+\centering \small
+\caption{Prithvi-EO-2.0 linear-probing setup used in the current experiments.}
+\label{tab:training_config}
+\resizebox{\linewidth}{!}{
+\begin{tabular}{ll}
+\toprule
+Parameter & Value \\
+\midrule
+Backbone & Prithvi-EO-2.0 300M TL \\
+Trainable part & MLP decoder/head only \\
+Frozen parameters & Encoder backbone \\
+Bands & Blue, Green, Red, NIR Narrow, SWIR1, SWIR2 \\
+Input size & $224\times224$ \\
+Batch size & 128 \\
+Optimizer & AdamW \\
+Learning rate & $1\times10^{-3}$ with cosine annealing \\
+Weight decay & $1\times10^{-4}$ \\
+Precision & BF16 mixed precision \\
+Early stopping & Patience = 15 epochs \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+% \subsection{Biome Distribution Analysis}
+
+% Before analyzing performance, we first examine the biome composition of the evaluation splits. In the m-BigEarthNet preprocessing, the original split is highly imbalanced across biomes: Temperate Broadleaf and Mixed Forests and Mediterranean regions dominate the validation and test splits, while Temperate Conifer Forests account for only 1.4\% of the test samples. This imbalance motivates biome-aware evaluation rather than only aggregate dataset-level metrics. Because large-scale Earth-observation splits can retain spatial correlation and label noise, reliable subgroup evaluation benefits from careful split construction and dataset refinement~\cite{bigearthnetmm}.
+\subsection{Biome Distribution Analysis}
+
+Before reporting performance, we first characterize the biome composition of the evaluation splits, as this directly affects the reliability of group-robustness conclusions. Across the \method benchmark, the original dataset splits exhibit pronounced ecological imbalance. In m-BigEarthNet, for example, Temperate Broadleaf and Mixed Forests together with Mediterranean Forests, Woodlands and Scrub dominate the validation and test sets, while Boreal Forests/Taiga and Temperate Conifer Forests are severely under-represented (the latter comprising only 1.4\% of test samples). Similar geographic and ecological skews are present in m-EuroSAT, m-SA-Crop-Type, and MMEarth20K, although the specific dominant and rare biomes vary with each dataset's spatial coverage.
+
+Such imbalances have important implications. Aggregate metrics (macro-F1, mIoU, etc.) can be heavily influenced by performance on frequent biomes, potentially concealing large disparities on ecologically distinct but data-scarce regions. Moreover, because remote-sensing datasets often preserve spatial autocorrelation and contain label noise, standard random splits can further destabilize subgroup evaluation. These issues motivate the design of \method: we adopt careful preprocessing, retain the original splits for comparability with prior work, and employ a two-level grouping strategy (mapping 14 raw terrestrial biomes into six ecologically meaningful macro-groups) to obtain more stable per-group statistics while preserving interpretability.
+
+The per-biome results presented in the following sections demonstrate that these distributional characteristics translate into substantial and systematic performance gaps, underscoring the need for biome-aware evaluation beyond conventional aggregate scores.
+
+\noindent \textbf{Global Performance}
+Table~\ref{tab:global_results} summarizes the global test performance of the completed Prithvi-EO-2.0 runs. The model achieves strong aggregate performance on the classification tasks and reasonable performance on the more challenging segmentation tasks. However, these global scores alone do not reveal whether the model performs consistently across ecological groups.
+
+\begin{table}[t]
+\centering
+\caption{Global test performance of completed Prithvi-EO-2.0 linear-probing runs. Macro-F1 is used for m-EuroSAT, F1@opt for m-BigEarthNet, and mIoU for m-SA-Crop-Type and MMEarth20K.}
+\label{tab:global_results}
+\resizebox{0.98\linewidth}{!}{
+\begin{tabular}{lllcc}
+\toprule
+Dataset & Task & Method & Metric & Value \\
+\midrule
+m-EuroSAT & Classification & Original ERM & Macro-F1 & 0.940 \\
+m-EuroSAT & Classification & BOLP & Macro-F1 & 0.942 \\
+m-EuroSAT & Classification & DBR & Macro-F1 & 0.954 \\
+m-BigEarthNet & Multi-label cls. & Original ERM & F1@opt & 0.626 \\
+m-BigEarthNet & Multi-label cls. & BOLP & F1@opt & 0.642 \\
+m-BigEarthNet & Multi-label cls. & DBR & F1@opt & 0.600 \\
+m-SA-Crop-Type & Segmentation & Original ERM & Global mIoU & 0.294 \\
+m-SA-Crop-Type & Segmentation & Original ERM & Pixel Acc. & 0.651 \\
+m-SA-Crop-Type & Segmentation & BOLP & Global mIoU & 0.286 \\
+m-SA-Crop-Type & Segmentation & BOLP & Pixel Acc. & 0.625 \\
+m-SA-Crop-Type & Segmentation & DBR & Global mIoU & 0.278 \\
+m-SA-Crop-Type & Segmentation & DBR & Pixel Acc. & 0.645 \\
+MMEarth20K & Segmentation & Original ERM & Global mIoU & 0.463 \\
+MMEarth20K & Segmentation & BOLP & Global mIoU & 0.437 \\
+MMEarth20K & Segmentation & DBR & Global mIoU & 0.464 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\subsection{Biome-Wise Performance}
+
+Table~\ref{tab:per_biome_classification} reports fine-grained biome-wise classification results for the original ERM runs on m-EuroSAT and m-BigEarthNet. On m-EuroSAT, Prithvi-EO-2.0 performs strongly in the dominant Temperate Broadleaf and Mediterranean groups but shows lower macro-F1 in Boreal Forests/Taiga and Temperate Conifer Forests. On m-BigEarthNet, the Mediterranean group is the lowest-performing group under original training, despite strong performance in Boreal Forests/Taiga. These results show that high aggregate performance can hide substantial biome-dependent disparities.
+
+\begin{table}[t]
+\centering
+\caption{Macro-group-wise classification and segmentation results for Prithvi-EO-2.0 under original ERM, BOLP, and DBR. F1@opt denotes macro-F1 at per-class optimal thresholds for the multi-label m-BigEarthNet task. Unknown/water samples are reported for completeness but excluded from primary fairness summaries.}
+\label{tab:per_biome_classification}
+\scalebox{0.625}{
+\begin{tabular}{llcccc}
+\toprule
+Dataset & Biome & Test $N$ & Orig. & BOLP & DBR \\
+\midrule
+\multirow{3}{2.5cm}{m-EuroSAT \\ Macro-F1}
+& High-Amplitude Phenological & 724 & 0.929 & 0.933 & 0.946 \\
+& Aseasonal High-Biomass & 25 & 0.836 & 0.843 & 0.850 \\
+& Transitional Herbaceous and Scrub & 239 & 0.926 & 0.922 & 0.964 \\
+\midrule
+\multirow{3}{2.5cm}{m-BigEarthNet \\ F1@opt}
+& High-Amplitude Phenological & 535 & 0.634 & 0.646 & 0.561 \\
+& Aseasonal High-Biomass & 14 & 0.627 & 0.629 & 0.558 \\
+& Transitional Herbaceous and Scrub & 336 & 0.497 & 0.520 & 0.546 \\
+\midrule
+\multirow{2}{2.5cm}{m-SA-Crop-Type \\ mIoU}
+& Transitional Herbaceous and Scrub & 875 & 0.290 & 0.279 & 0.269 \\
+& Xeric and Mineralogical & 124 & 0.176 & 0.195 & 0.197 \\
+\midrule
+\multirow{6}{2.5cm}{MMEarth20K \\ mIoU}
+& High-Amplitude Phenological & 560 & 0.447 & 0.419 & 0.440 \\
+& Aseasonal High-Biomass & 510 & 0.392 & 0.366 & 0.386 \\
+& Cryospheric and Short-Cycle & 360 & 0.418 & 0.395 & 0.419 \\
+& Hydrologically Modulated & 280 & 0.333 & 0.294 & 0.342 \\
+& Xeric and Mineralogical & 170 & 0.382 & 0.376 & 0.396 \\
+& Transitional Herbaceous and Scrub & 120 & 0.423 & 0.400 & 0.424 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+For the m-SA-Crop-Type segmentation task, Prithvi-EO-2.0 under original ERM obtains 0.1755 mIoU on the Deserts and Xeric Shrublands group (124 test samples), substantially lower than the 0.2891 mIoU on the Mediterranean Forests, Woodlands and Scrub group (875 samples). This demonstrates that biome-dependent disparities are also present in dense prediction tasks.
+
+\begin{table*}[h]
+\centering
+\caption{Debiasing and robustness summary for classification and segmentation tasks under the frozen-backbone Prithvi-EO-2.0 linear-probing protocol. Overall denotes Macro-F1 for m-EuroSAT, F1@opt for m-BigEarthNet, and global mIoU for segmentation datasets. Worst denotes the corresponding worst-group score. Lower NFR, standard deviation, EOdd, and DPM indicate better cross-group consistency.}
+\label{tab:debiasing_results_cls}
+\resizebox{0.9\textwidth}{!}{
+\begin{tabular}{lllcccccc}
+\toprule
+Task & Dataset & Method & Overall & Worst & NFR $\downarrow$ & Std. dev. $\downarrow$ & EOdd $\downarrow$ & DPM $\downarrow$ \\
+\midrule
+\multirow{6}{*}{Classification} & m-EuroSAT & Original ERM & 0.940 & 0.836 & 0.104 & 0.043 & 0.237 & 0.093 \\
+ & m-EuroSAT & BOLP & 0.942 & 0.843 & 0.100 & 0.040 & 0.183 & 0.099 \\
+ & m-EuroSAT & DBR & 0.954 & 0.850 & 0.124 & 0.050 & 0.169 & 0.106 \\
+\cmidrule{2-9}
+ & m-BigEarthNet & Original ERM & 0.626 & 0.497 & 0.293 & 0.063 & 0.564 & 0.215 \\
+ & m-BigEarthNet & BOLP & 0.642 & 0.520 & 0.211 & 0.056 & 0.392 & 0.138 \\
+ & m-BigEarthNet & DBR & 0.600 & 0.546 & 0.028 & 0.007 & 0.441 & 0.138 \\
+\midrule
+\multirow{6}{*}{Segmentation} & m-SA-Crop-Type & Original ERM & 0.294 & 0.176 & 0.492 & 0.057 & 0.281 & 0.067 \\
+ & m-SA-Crop-Type & BOLP & 0.286 & 0.195 & 0.353 & 0.029 & 0.206 & 0.084 \\
+ & m-SA-Crop-Type & DBR & 0.278 & 0.197 & 0.309 & 0.036 & 0.188 & 0.072 \\
+\cmidrule{2-9}
+ & MMEarth20K & Original ERM & 0.463 & 0.333 & 0.285 & 0.036 & 0.222 & 0.114 \\
+ & MMEarth20K & BOLP & 0.437 & 0.294 & 0.334 & 0.040 & 0.173 & 0.125 \\
+ & MMEarth20K & DBR & 0.464 & 0.342 & 0.243 & 0.032 & 0.213 & 0.098 \\
+\bottomrule
+\end{tabular}}
+\end{table*}
+
+
+% Table~\ref{tab:per_biome_segmentation} reports biome-wise segmentation results for m-SA-Crop-Type. The desert group obtains substantially lower mIoU than the Mediterranean group, showing that biome-dependent disparities also appear in dense prediction tasks.
+
+% \begin{table}[t]
+% \centering
+% \caption{Biome-wise segmentation results for Prithvi-EO-2.0 under original ERM on m-SA-Crop-Type.}
+% \label{tab:per_biome_segmentation}
+% \scalebox{0.8}{
+% \begin{tabular}{lcc}
+% \toprule
+% Biome & Test $N$ & mIoU \\
+% \midrule
+% Deserts \& Xeric Shrublands & 124 & 0.1755 \\
+% Mediterranean Forests, Woodlands \& Scrub & 875 & 0.2891 \\
+% \bottomrule
+% \end{tabular}}
+% \end{table}
+
+
+
+
+\subsection{Debiasing and Robustness Results}
+
+Table~\ref{tab:debiasing_results_cls} summarizes the biome-aware robustness and debiasing results under the frozen-backbone Prithvi-EO-2.0 linear-probing protocol. Lower NFR, standard deviation, EOdd, and DPM indicate more consistent performance across biome groups.
+
+The biome-balanced m-BigEarthNet run provides an important negative result. Although balanced sampling equalizes training counts across matched biome groups, it lowers overall performance and does not improve the worst-group metric. This suggests that naive undersampling removes useful training diversity and is not sufficient for mitigating biome-dependent representational bias.
+
+BOLP provides a stronger representation-level mitigation strategy. On m-EuroSAT, BOLP improves the worst-group score from 0.800 to 0.843 and reduces NFR from 0.223 to 0.099, with only a small reduction in overall macro-F1. On m-BigEarthNet, BOLP improves overall F1@opt from 0.626 to 0.642 and improves the worst-group score from 0.495 to 0.520. It also reduces EOdd and DPM, indicating improved cross-biome consistency. These results suggest that removing biome-associated directions from frozen RSFM embeddings can reduce ecological group disparities without updating the backbone.
+
+
+
+
+Static biome reweighting and DBR are part of the proposed framework, but we do not include them in Table~\ref{tab:debiasing_results_cls} until all corresponding runs are completed under the same evaluation script. This avoids mixing completed BOLP results with placeholder mitigation rows.
+
+
+\section{Discussion}
+
+The results validate the main premise of \method: aggregate RSFM scores can mask ecological group disparities. Across the four datasets, the weakest groups vary by task, from Aseasonal High-Biomass on m-EuroSAT to Transitional Herbaceous and Scrub on m-BigEarthNet and Xeric and Mineralogical on m-SA-Crop-Type. This indicates that biome labels provide an interpretable axis for diagnosing when a frozen RSFM representation is less reliable under specific ecological regimes, rather than assuming that high average transfer performance implies uniform reliability.
+
+The mitigation results show that no single biome-aware strategy is uniformly best. BOLP is effective for the completed classification tasks: it improves worst-group performance on m-EuroSAT and m-BigEarthNet and reduces several disparity measures, suggesting that frozen embeddings contain biome-associated directions that can amplify group-wise gaps. DBR offers a complementary loss-level trade-off: it improves worst-group performance in several settings, but can reduce aggregate performance, especially on m-BigEarthNet and m-SA-Crop-Type. These results highlight the need to report both aggregate and group-robustness metrics when assessing debiasing methods.
+
+The segmentation results are more mixed. On m-SA-Crop-Type, BOLP and DBR improve worst-group mIoU but reduce global mIoU; on MMEarth20K, DBR gives the most balanced outcome, while BOLP degrades overall and worst-group mIoU. This suggests that biome information can act both as a nuisance factor and as task-relevant context, particularly for dense land-cover prediction. Overall, \method should be viewed not only as a benchmark for ranking methods, but also as a diagnostic tool for understanding when ecological variation helps or hurts downstream RSFM transfer.
+
+\section{Limitations}
+
+\method has three main limitations. First, biome labels are assigned at the patch level using centroid coordinates and external terrestrial ecoregion maps. This is scalable and consistent across tasks, but it can be noisy near biome boundaries and cannot capture mixed ecological conditions within a patch. In addition, each dataset covers only a subset of the raw biomes and macro-groups, so worst-group and disparity metrics should be interpreted relative to the matched groups available in each split.
+
+Second, the empirical study is an initial case study using Prithvi-EO-2.0 on four datasets. The benchmark is designed to support additional RSFMs, tasks, and sensors, but broader conclusions require evaluation of more backbones and larger task coverage. The current group-fairness metrics are also more direct for classification than for segmentation; for dense prediction, pixel-level, patch-level, and object/class-level fairness definitions may lead to different interpretations.
+
+Finally, biome-aware robustness captures only one spatially meaningful dimension of remote-sensing bias. Other sources of disparity, including sensor and source shifts, geographic or country-level imbalance, spatial resolution, temporal acquisition effects, label noise, and uneven satellite-data coverage, are not fully captured by biome groups~\cite{geobs2025,earthshift2026,coveragebias_satellite}. \method should therefore be viewed as a complementary ecological robustness benchmark rather than a complete fairness audit for remote-sensing applications.
+
+
+\section{Conclusion}
+
+We introduced \method, a biome-aware benchmark and debiasing framework for remote sensing foundation models. The benchmark augments four classification and segmentation datasets with biome-derived group labels and evaluates RSFMs using both standard task metrics and group-robustness measures. Our Prithvi-EO-2.0 case study shows that strong aggregate performance can hide substantial biome-dependent disparities in both classification and segmentation. The results also show that mitigation methods can trade off aggregate accuracy and worst-group robustness, especially in dense prediction tasks. In contrast, BOLP improves worst-group performance and reduces several disparity metrics by removing biome-associated directions from frozen RSFM embeddings, without updating the backbone. These findings indicate that biome-aware evaluation is important for understanding the reliability of RSFMs in global Earth-observation settings. We hope \method will support more transparent, robust, and ecologically reliable evaluation of future remote sensing foundation models.
+
+\clearpage
+
+{\small
+\bibliographystyle{ieeenat_fullname}
+\bibliography{FairRSFM_main}
+}
+
+\end{document}
