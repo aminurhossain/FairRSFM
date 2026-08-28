@@ -17,4 +17,3 @@ src/fairrsfm/
 The implementation is in preparation. Public modules will follow the protocol
 documented in [the benchmark specification](../docs/benchmark.md) and [the
 methods reference](../docs/methods.md).
-

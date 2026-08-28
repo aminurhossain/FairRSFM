@@ -24,4 +24,3 @@ protocol](../docs/benchmark.md) and [complete result tables](../docs/results.md)
 The `outputs/` directory is intentionally excluded from version control except
 for its ignore file. Published artifacts and benchmark metadata will be linked
 from the main repository README rather than committed as generated files.
-
