@@ -173,9 +173,9 @@ Unknown, water-only, or unmatched samples are reported separately and excluded f
 | Project documentation and reported results | Available | This repository |
 | Paper | Coming soon | [arXiv placeholder](https://arxiv.org/abs/XXXX.XXXXX) |
 | Benchmark metadata and dataset | Coming soon | [Hugging Face placeholder](https://huggingface.co/datasets/aminurhossain/FairRSFM) |
-| Preprocessing and biome-labeling code | In preparation | This repository |
-| Training and mitigation code | In preparation | This repository |
-| Evaluation scripts and configs | In preparation | This repository |
+| Preprocessing and biome-labeling code | In preparation | [`src/fairrsfm/`](src/fairrsfm/) |
+| Training and mitigation code | In preparation | [`src/fairrsfm/`](src/fairrsfm/) |
+| Evaluation scripts and configs | In preparation | [`experiments/`](experiments/) |
 
 ## Repository Structure
 
@@ -186,11 +186,22 @@ FairRSFM/
 |   |-- fairrsfm-architecture.png
 |   |-- global-biome-macro-groups.png
 |   `-- macro-group-distribution.png
-`-- docs/
-    |-- benchmark.md
-    |-- biome-groups.md
-    |-- methods.md
-    `-- results.md
+|-- docs/
+|   |-- benchmark.md
+|   |-- biome-groups.md
+|   |-- methods.md
+|   `-- results.md
+|-- experiments/
+|   |-- configs/
+|   `-- outputs/
+`-- src/
+    `-- fairrsfm/
+        |-- biomes/
+        |-- data/
+        |-- evaluation/
+        |-- methods/
+        |-- models/
+        `-- training/
 ```
 
 ## Citation
