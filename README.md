@@ -4,7 +4,7 @@
 
 **Anonymous WACV 2027 Submission #2158**
 
-[Paper PDF](assets/fairrsfm-paper.pdf) | [Revised LaTeX source](Paper___WACV_2027___FairRSFM/FairRSFM_revised.tex) | [Repository](https://github.com/aminurhossain/FairRSFM)
+[Paper PDF](assets/fairrsfm-paper.pdf) | [Framework figure](assets/fairrsfm-framework.pdf) | [Repository](https://github.com/aminurhossain/FairRSFM)
 
 <br>
 
@@ -145,26 +145,19 @@ Unknown, water-only, or unmatched samples are excluded from the primary worst-gr
 ```text
 FairRSFM/
 |-- README.md
-|-- assets/
+`-- assets/
 |   |-- biome-hero.png
 |   |-- fairrsfm-framework.pdf
 |   |-- fairrsfm-paper.pdf
-|   `-- macro-group-distribution.png
-`-- Paper___WACV_2027___FairRSFM/
-    |-- FairRSFM_revised.tex
-    |-- FairRSFM_main.bib
-    |-- model.pdf
-    |-- macro_group_distribution.png
-    `-- ...
+    `-- macro-group-distribution.png
 ```
 
-The current repository snapshot contains the revised manuscript, figures, and release documentation. Training, preprocessing, and evaluation code will be added to the same repository.
+The current repository snapshot contains the paper PDF, figures, and release documentation. Training, preprocessing, and evaluation code will be added to the same repository.
 
 ## Paper
 
 - [Read the paper](assets/fairrsfm-paper.pdf)
-- [View the final revised LaTeX source](Paper___WACV_2027___FairRSFM/FairRSFM_revised.tex)
-- [Browse all manuscript files](Paper___WACV_2027___FairRSFM)
+- [View the framework figure](assets/fairrsfm-framework.pdf)
 
 ## Citation
 
