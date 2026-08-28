@@ -1,16 +1,16 @@
 <div align="center">
 
-# FairRSFM
-
-### A Biome-Aware Benchmark and Debiasing Framework for Remote Sensing Foundation Models
+<h1>FairRSFM: A Biome-Aware Benchmark and Debiasing Framework for Remote Sensing Foundation Models</h1>
 
 **Author list and affiliations will be added with the public paper release.**
 
-[![arXiv](https://img.shields.io/badge/arXiv-coming%20soon-B31B1B.svg)](https://arxiv.org/abs/XXXX.XXXXX)
-[![Dataset](https://img.shields.io/badge/Hugging%20Face-dataset%20coming%20soon-FFD21E.svg)](https://huggingface.co/datasets/aminurhossain/FairRSFM)
-[![Code](https://img.shields.io/badge/code-in%20preparation-2F6F3E.svg)](https://github.com/aminurhossain/FairRSFM)
+<p>
+  <a href="https://arxiv.org/abs/XXXX.XXXXX"><img src="https://img.shields.io/badge/arXiv-coming%20soon-B31B1B.svg" alt="arXiv paper coming soon"></a>
+  <a href="https://huggingface.co/datasets/aminurhossain/FairRSFM"><img src="https://img.shields.io/badge/Hugging%20Face-dataset%20coming%20soon-FFD21E.svg" alt="Hugging Face dataset coming soon"></a>
+  <a href="https://github.com/aminurhossain/FairRSFM"><img src="https://img.shields.io/badge/code-in%20preparation-2F6F3E.svg" alt="Code in preparation"></a>
+</p>
 
-**[Overview](#overview) | [Benchmark](#benchmark) | [Methods](#debiasing-methods) | [Results](#headline-results) | [Documentation](#documentation) | [Citation](#citation)**
+**[Overview](#overview) | [Benchmark](#benchmark) | [Methods](#debiasing-methods) | [Results](#headline-results) | [Code](#code-and-release-status) | [Documentation](#documentation) | [Citation](#citation)**
 
 </div>
 
@@ -48,7 +48,7 @@ Remote sensing foundation models (RSFMs) are normally compared using aggregate a
 - **Biome-Orthogonal Linear Probing (BOLP)**, which removes dominant biome-associated directions from frozen embeddings without updating the backbone.
 - Complete reporting of task performance, worst-group robustness, calibration, equalized-odds disparity, and demographic-parity disparity.
 
-## Project At A Glance
+## Project at a Glance
 
 | Component | Scope |
 |---|---:|
@@ -166,7 +166,11 @@ Unknown, water-only, or unmatched samples are reported separately and excluded f
 | [Methods and metrics](docs/methods.md) | DBR, BOLP, GroupDRO, task metrics, robustness, calibration, and parity |
 | [Complete results](docs/results.md) | All Prithvi, SatMAE, DOFA, and biome-wise results from the paper |
 
-## Release Status
+## Code and Release Status
+
+The repository now provides the public package and experiment layout. The
+implementation and reproducible configurations are being prepared for release;
+the current tree does not claim executable training code.
 
 | Component | Status | Planned location |
 |---|---|---|
@@ -176,11 +180,13 @@ Unknown, water-only, or unmatched samples are reported separately and excluded f
 | Preprocessing and biome-labeling code | In preparation | [`src/fairrsfm/`](src/fairrsfm/) |
 | Training and mitigation code | In preparation | [`src/fairrsfm/`](src/fairrsfm/) |
 | Evaluation scripts and configs | In preparation | [`experiments/`](experiments/) |
+| License | To be confirmed before code and data release | This repository |
 
 ## Repository Structure
 
 ```text
 FairRSFM/
+|-- .gitignore
 |-- README.md
 |-- assets/
 |   |-- fairrsfm-architecture.png
@@ -192,9 +198,15 @@ FairRSFM/
 |   |-- methods.md
 |   `-- results.md
 |-- experiments/
+|   |-- README.md
 |   |-- configs/
+|   |   |-- backbones/
+|   |   |-- datasets/
+|   |   |-- methods/
+|   |   `-- tasks/
 |   `-- outputs/
 `-- src/
+    |-- README.md
     `-- fairrsfm/
         |-- biomes/
         |-- data/
