@@ -5,7 +5,7 @@
 **Author list and affiliations will be added with the public paper release.**
 
 <p>
-  <a href="https://arxiv.org/abs/XXXX.XXXXX"><img src="https://img.shields.io/badge/arXiv-coming%20soon-B31B1B.svg" alt="arXiv paper coming soon"></a>
+  <a href="https://arxiv.org/abs/2610.05790"><img src="https://img.shields.io/badge/arXiv-coming%20soon-B31B1B.svg" alt="arXiv paper coming soon"></a>
   <a href="https://huggingface.co/datasets/aminurhossain/FairRSFM"><img src="https://img.shields.io/badge/Hugging%20Face-dataset%20coming%20soon-FFD21E.svg" alt="Hugging Face dataset coming soon"></a>
   <a href="https://github.com/aminurhossain/FairRSFM"><img src="https://img.shields.io/badge/code-in%20preparation-2F6F3E.svg" alt="Code in preparation"></a>
 </p>
