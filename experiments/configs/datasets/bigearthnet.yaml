@@ -1,0 +1,13 @@
+name: "m-BigEarthNet"
+benchmark: "GEO-Bench"
+task_type: "multi_label_classification"
+num_classes: 43
+input_modality: "Sentinel-2 (12 bands)"
+biome_mapping: "experiments/configs/data_mappings/bigearthnet_biome_mapping.json"
+metrics:
+  - "macro_f1"
+  - "micro_f1"
+  - "map"
+  - "worst_group_f1"
+  - "fairness_disparity"
+  - "gini"

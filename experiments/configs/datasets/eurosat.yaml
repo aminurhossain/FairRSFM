@@ -1,0 +1,19 @@
+name: "m-EuroSAT"
+benchmark: "GEO-Bench"
+task_type: "single_label_classification"
+num_classes: 10
+input_modality: "Sentinel-2 (13 bands)"
+biome_mapping: "experiments/configs/data_mappings/eurosat_biome_mapping.json"
+metrics:
+  - "macro_f1"
+  - "accuracy"
+  - "worst_group_f1"
+  - "fairness_disparity"
+  - "gini"
+  - "equalized_odds"
+  - "demographic_parity"
+  - "ece"
+splits:
+  train: 18900
+  val: 5400
+  test: 2700

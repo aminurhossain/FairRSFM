@@ -1,0 +1,11 @@
+name: "MMEarth-20k"
+task_type: "semantic_segmentation"
+num_classes: 10
+input_modality: "Sentinel-2 + Sentinel-1 + DEM"
+metrics:
+  - "miou"
+  - "macro_f1"
+  - "worst_group_miou"
+  - "fairness_disparity"
+  - "gini"
+macro_biomes: 6

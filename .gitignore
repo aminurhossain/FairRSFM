@@ -31,6 +31,7 @@ Thumbs.db
 *.swo
 
 # Experiment outputs, logs, and WandB
+scratch/
 experiments/outputs/*
 !experiments/outputs/.gitignore
 DOFA/
@@ -43,7 +44,7 @@ slurm-*.out
 *.out
 
 # Model weights and checkpoints (host on Hugging Face / Zenodo)
-checkpoints/
+/checkpoints/
 *.pt
 *.pth
 *.ckpt
@@ -52,10 +53,10 @@ checkpoints/
 *.onnx
 
 # Datasets, large rasters, and binary caches
-data/
-datasets/
-Geobench/
-MMearth20k/
+/data/
+/datasets/
+/Geobench/
+/MMearth20k/
 *.h5
 *.hdf5
 *.tif

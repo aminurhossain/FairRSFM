@@ -1,0 +1,12 @@
+name: "m-SA-crop-type"
+benchmark: "GEO-Bench"
+task_type: "semantic_segmentation"
+num_classes: 10
+input_modality: "Sentinel-2 (12 bands)"
+biome_mapping: "experiments/configs/data_mappings/sa_crop_biome_mapping.json"
+metrics:
+  - "miou"
+  - "macro_f1"
+  - "worst_group_miou"
+  - "fairness_disparity"
+  - "gini"

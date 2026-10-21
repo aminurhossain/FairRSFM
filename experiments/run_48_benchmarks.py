@@ -51,8 +51,8 @@ def parse_args():
     return parser.parse_args()
 
 
-def extract_metrics_from_log(log_path: Path) -> dict:
-    """Extract standard DOFA-aligned performance & fairness metrics from run log."""
+def extract_metrics_from_log(log_path: Path, run_out: Path = None) -> dict:
+    """Extract standard DOFA-aligned performance & fairness metrics from val_results.json or run log."""
     metrics = {
         "overall_performance": None,
         "worst_group": None,
@@ -69,70 +69,121 @@ def extract_metrics_from_log(log_path: Path) -> dict:
 
     try:
         content = log_path.read_text(encoding="utf-8", errors="ignore")
-        lines = content.splitlines()
 
+        # 1. First priority: Check if val_results.json is referenced in log or exists in run_out
+        val_json_path = None
+        if run_out and (run_out / "val_results.json").is_file():
+            val_json_path = run_out / "val_results.json"
+        else:
+            json_match = re.search(r"\[JSON\]\s+Results updated in\s+([^\s\n]+val_results\.json)", content)
+            if json_match:
+                cand = Path(json_match.group(1).strip())
+                if cand.is_file():
+                    val_json_path = cand
+
+        if val_json_path and val_json_path.is_file():
+            try:
+                data = json.loads(val_json_path.read_text(encoding="utf-8"))
+                last = data[-1] if isinstance(data, list) else data
+                metrics["overall_performance"] = (
+                    last.get("overall_macro_f1")
+                    or last.get("overall_mIoU")
+                    or last.get("overall_miou")
+                    or last.get("overall_f1")
+                )
+                metrics["worst_group"] = (
+                    last.get("worst_case_macro_f1")
+                    or last.get("worst_case_mIoU")
+                    or last.get("worst_case_miou")
+                    or last.get("worst_f1")
+                )
+                metrics["best_group"] = (
+                    last.get("best_case_macro_f1")
+                    or last.get("best_case_mIoU")
+                    or last.get("best_case_miou")
+                    or last.get("best_f1")
+                )
+                metrics["group_mean"] = (
+                    last.get("group_mean_macro_f1")
+                    or last.get("group_mean_mIoU")
+                    or last.get("group_mean_miou")
+                    or last.get("mean_f1")
+                )
+                metrics["per"] = (
+                    last.get("performance_equity_ratio")
+                    or last.get("per_ratio")
+                    or last.get("per")
+                )
+                metrics["gini"] = (
+                    last.get("gini_coefficient")
+                    or last.get("gini")
+                )
+                metrics["nfr"] = (
+                    last.get("normalized_fairness_range")
+                    or last.get("nfr")
+                )
+                metrics["eq_odds"] = (
+                    last.get("equalized_odds_disparity")
+                    or last.get("equalized_odds")
+                )
+                metrics["demographic_parity"] = (
+                    last.get("demographic_parity_disparity")
+                    or last.get("demographic_parity_difference")
+                    or last.get("demographic_parity")
+                    or last.get("dpm")
+                )
+                return metrics
+            except Exception as e:
+                pass
+
+        # 2. Second priority: Fallback regex matching lines in log file
+        lines = content.splitlines()
         for line in reversed(lines):
-            line_str = line.strip()
-            # SA-Crop / MMEarth IoU summary
-            if "Overall mIoU" in line_str and metrics["overall_performance"] is None:
-                for part in line_str.split("|"):
-                    if "Overall mIoU:" in part:
-                        try:
-                            val = float(part.split("Overall mIoU:")[1].replace("%", "").strip())
-                            metrics["overall_performance"] = val
-                        except Exception:
-                            pass
-            # EuroSAT / BigEarthNet Macro F1 summary
-            elif "Overall Macro F1" in line_str and metrics["overall_performance"] is None:
-                for part in line_str.split("|"):
-                    if "Overall Macro F1:" in part:
-                        try:
-                            val = float(part.split("Overall Macro F1:")[1].replace("%", "").strip())
-                            metrics["overall_performance"] = val
-                        except Exception:
-                            pass
+            l = line.strip()
+            # Overall Macro F1 / mIoU
+            if metrics["overall_performance"] is None:
+                m1 = re.search(r"Overall Macro F1\s*[:]?\s*([0-9\.]+)", l)
+                m2 = re.search(r"Overall mIoU\s*[:]?\s*([0-9\.]+)", l)
+                if m1:
+                    metrics["overall_performance"] = float(m1.group(1))
+                elif m2:
+                    metrics["overall_performance"] = float(m2.group(1))
 
             # Worst-case group
-            if "Worst-Case Group" in line_str and metrics["worst_group"] is None:
-                try:
-                    metrics["worst_group"] = float(line_str.split(":")[-1].strip())
-                except Exception:
-                    pass
+            if metrics["worst_group"] is None:
+                mw = re.search(r"Worst-[Cc]ase(?:\s+Group)?(?:\s+Macro F1)?\s*[:]?\s*([0-9\.]+)", l)
+                if mw:
+                    metrics["worst_group"] = float(mw.group(1))
 
             # Best-case group
-            if "Best-Case Group" in line_str and metrics["best_group"] is None:
-                try:
-                    metrics["best_group"] = float(line_str.split(":")[-1].strip())
-                except Exception:
-                    pass
+            if metrics["best_group"] is None:
+                mb = re.search(r"Best-[Cc]ase(?:\s+Group)?(?:\s+Macro F1)?\s*[:]?\s*([0-9\.]+)", l)
+                if mb:
+                    metrics["best_group"] = float(mb.group(1))
 
-            # Performance Equity Ratio (PER)
-            if "Performance Equity Ratio (PER)" in line_str and metrics["per"] is None:
-                try:
-                    metrics["per"] = float(line_str.split(":")[-1].strip())
-                except Exception:
-                    pass
+            # PER
+            if metrics["per"] is None:
+                mp = re.search(r"Performance Equity Ratio[^\d]*([0-9\.]+)", l)
+                if mp:
+                    metrics["per"] = float(mp.group(1))
 
-            # Gini Coefficient
-            if "Gini Coefficient" in line_str and metrics["gini"] is None:
-                try:
-                    metrics["gini"] = float(line_str.split(":")[-1].strip())
-                except Exception:
-                    pass
+            # Gini
+            if metrics["gini"] is None:
+                mg = re.search(r"Gini Coefficient[^\d]*([0-9\.]+)", l)
+                if mg:
+                    metrics["gini"] = float(mg.group(1))
 
-            # Equalized Odds Disparity
-            if "Equalized Odds Disparity" in line_str and metrics["eq_odds"] is None:
-                try:
-                    metrics["eq_odds"] = float(line_str.split(":")[-1].strip())
-                except Exception:
-                    pass
+            # Equalized Odds
+            if metrics["eq_odds"] is None:
+                me = re.search(r"Equalized Odds Disparity[^\d]*([0-9\.]+)", l)
+                if me:
+                    metrics["eq_odds"] = float(me.group(1))
 
             # Demographic Parity
-            if ("Demographic Parity" in line_str or "DPM" in line_str) and metrics["demographic_parity"] is None:
-                try:
-                    metrics["demographic_parity"] = float(line_str.split(":")[-1].strip())
-                except Exception:
-                    pass
+            if metrics["demographic_parity"] is None:
+                md = re.search(r"(?:Demographic Parity|DPM)[^\d]*([0-9\.]+)", l)
+                if md:
+                    metrics["demographic_parity"] = float(md.group(1))
 
     except Exception as e:
         print(f"Warning parsing metrics from {log_path}: {e}")
@@ -153,7 +204,11 @@ def write_markdown_summary(summary_path: Path, results: list, total_count: int):
 
     for r in results:
         m = r["metrics"]
-        perf_str = f"{m['overall_performance']:.2f}%" if m.get("overall_performance") is not None else "-"
+        perf_val = m.get("overall_performance")
+        if perf_val is not None:
+            perf_str = f"{perf_val:.4f}" if perf_val <= 1.0 else f"{perf_val:.2f}%"
+        else:
+            perf_str = "-"
         worst_str = f"{m['worst_group']:.4f}" if m.get("worst_group") is not None else "-"
         per_str = f"{m['per']:.4f}" if m.get("per") is not None else "-"
         gini_str = f"{m['gini']:.4f}" if m.get("gini") is not None else "-"
@@ -269,7 +324,7 @@ def main():
             print(f"❌ [{idx:02d}/{total_runs}] FAILED {run_name} (exit code: {exit_code}) in {duration:.1f}s")
 
         # Parse metrics
-        extracted = extract_metrics_from_log(run_log)
+        extracted = extract_metrics_from_log(run_log, run_out)
 
         run_summary = {
             "index": idx,

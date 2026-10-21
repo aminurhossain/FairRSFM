@@ -100,6 +100,10 @@ class CleanProgressBar(TQDMProgressBar):
 
 BASE_DIR = ROOT_DIR
 DATA_DIR = BASE_DIR / "Geobench"
+if not DATA_DIR.exists() and os.environ.get("GEO_BENCH_DIR"):
+    DATA_DIR = Path(os.environ["GEO_BENCH_DIR"])
+if not DATA_DIR.exists():
+    DATA_DIR = Path("/data1/aminur/dataset/geobench")
 
 BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/bigearthnet_master_mapping.json"
 WEIGHTS_PT = BASE_DIR / "checkpoints/dofa/dofa_base_patch16_224.pth"

@@ -77,17 +77,10 @@ def get_script_path(model: str, dataset: str, method: str, head: str = "linear")
     )
 
 
-def detect_supported_args(script_path: Path, env: dict) -> str:
-    """Inspect script help output to determine exact CLI argument flags."""
+def detect_supported_args(script_path: Path, env: dict = None) -> str:
+    """Inspect script file content directly to determine exact CLI argument flags."""
     try:
-        proc = subprocess.run(
-            [sys.executable, str(script_path), "--help"],
-            capture_output=True,
-            text=True,
-            env=env,
-            timeout=10,
-        )
-        return proc.stdout + proc.stderr
+        return script_path.read_text(encoding="utf-8", errors="ignore")
     except Exception:
         return ""
 
