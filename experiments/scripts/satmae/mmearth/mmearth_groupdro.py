@@ -1,0 +1,1039 @@
+#!/usr/bin/env python3
+"""
+SatMAE ViT (Base / Large) — MMEarth-20k Semantic Segmentation (Group DRO Linear Probe)
+======================================================================================
+Key Features:
+  • Task: Semantic Segmentation on MMEarth Dynamic World (9 classes, ignore_index=-1)
+  • Architecture: SatMAE Group-Channels Vision Transformer (Frozen Backbone + Conv2d Probe Head)
+  • Method: Group Distributionally Robust Optimization (Group DRO, Sagawa et al. 2020)
+      - Dynamically updates group weights q via online exponentiated gradient ascent: q_g <- q_g * exp(eta_q * loss_g)
+      - Model minimizes weighted worst-case risk sum(q_g * loss_g) with CrossEntropyLoss(ignore_index=-1).
+  • Spectral Groups: 10 Sentinel-2 bands grouped by resolution & spectral profile:
+      - Group 0 (10m):  B02, B03, B04, B08  -> indices (0, 1, 2, 6)
+      - Group 1 (20m):  B05, B06, B07, B08A -> indices (3, 4, 5, 7)
+      - Group 2 (SWIR): B11, B12            -> indices (8, 9)
+  • Normalization: Official dataset reflectance normalization per Sentinel-2 product type
+  • Loss Function: CrossEntropyLoss(ignore_index=-1)
+  • Fairness Suite: Global mIoU & Macro F1, Subgroup mIoUs, PER, Gini, NFR, ECE Disparity,
+                   Equalized Odds, Demographic Parity, per-class IoU table
+  • Slim Checkpoints: Strips frozen encoder weights (~150 KB per .ckpt file)
+  • Live Test Logging: Evaluates test split at every validation epoch
+  • Consolidated JSONs: Saves cumulative epoch history to val_results.json and test_results.json under SATMAE/runs/
+"""
+
+import sys
+import os
+import json
+import logging
+import warnings
+import argparse
+from pathlib import Path
+from collections import defaultdict
+
+# Project root setup
+CURRENT_DIR = Path(__file__).resolve().parent
+# Project root and module resolution
+ROOT_DIR = Path(__file__).resolve()
+while ROOT_DIR.parent != ROOT_DIR:
+    if (ROOT_DIR / "pyproject.toml").is_file() or (ROOT_DIR / "src/fairrsfm").is_dir():
+        break
+    ROOT_DIR = ROOT_DIR.parent
+
+for p in [ROOT_DIR, ROOT_DIR / "src", ROOT_DIR / "src/fairrsfm", ROOT_DIR / "src/fairrsfm/models/upstream/SatMAE"]:
+    if str(p) not in sys.path and p.is_dir():
+        sys.path.insert(0, str(p))
+
+# SatMAE upstream module setup
+SATMAE_DIR = ROOT_DIR / "models/upstream/SatMAE"
+if not SATMAE_DIR.exists():
+    SATMAE_DIR = ROOT_DIR / "SatMAE-main"
+if str(SATMAE_DIR) not in sys.path:
+    sys.path.insert(0, str(SATMAE_DIR))
+
+# MMEarth dataset directory
+MMEARTH_DIR = ROOT_DIR / "methods/prithvi/segmentation/mmearth_20k"
+if not MMEARTH_DIR.exists():
+    MMEARTH_DIR = ROOT_DIR / "segmentation" / "mmearth_20k"
+if str(MMEARTH_DIR) not in sys.path:
+    sys.path.insert(0, str(MMEARTH_DIR))
+
+import numpy as np
+import torchvision.transforms.v2 as transforms
+import lightning as L
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
+from lightning.pytorch.callbacks import Callback, EarlyStopping, ModelCheckpoint, TQDMProgressBar
+from lightning.pytorch.loggers import TensorBoardLogger
+
+from mmearth_dynamic_world_datamodule import (
+    DYNAMIC_WORLD_CLASSES,
+    MMEarthDynamicWorldSegmentationDataModule,
+    MMEarthDynamicWorldSegmentationDataset,
+    find_one
+)
+
+try:
+    import models_vit_group_channels
+except ImportError as e:
+    raise ImportError(f"Could not import SatMAE group channels architecture from {SATMAE_DIR}: {e}")
+
+from sklearn.metrics import f1_score
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. TEE LOGGER & PROGRESS BAR
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TeeLogger:
+    def __init__(self, log_file_path: Path):
+        self.terminal = sys.stdout
+        self.log_file_path = log_file_path
+        self.log_file_path.parent.mkdir(parents=True, exist_ok=True)
+        self.log_file = open(self.log_file_path, "w", encoding="utf-8")
+
+    def write(self, message):
+        self.terminal.write(message)
+        if "\r" in message or "%|" in message or "it/s]" in message:
+            return
+        self.log_file.write(message)
+        self.log_file.flush()
+
+    def flush(self):
+        self.terminal.flush()
+        self.log_file.flush()
+
+
+class CleanProgressBar(TQDMProgressBar):
+    def __init__(self, refresh_rate: int = 20):
+        super().__init__(refresh_rate=refresh_rate)
+
+    def get_metrics(self, trainer, pl_module):
+        items = super().get_metrics(trainer, pl_module)
+        items.pop("v_num", None)
+        for k in list(items.keys()):
+            if k.startswith("val/"):
+                items.pop(k, None)
+        return items
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. PATHS & CONFIGURATION
+# ─────────────────────────────────────────────────────────────────────────────
+
+BASE_DIR  = ROOT_DIR
+DATA_ROOT = MMEARTH_DIR / "hardcoded"
+
+DEFAULT_CKPT_BASE  = BASE_DIR / "checkpoints/satmae/pretrain-vit-base-e199.pth"
+if not DEFAULT_CKPT_BASE.exists():
+    DEFAULT_CKPT_BASE = BASE_DIR / "models/satmae/pretrain-vit-base-e199.pth"
+if not DEFAULT_CKPT_BASE.exists():
+    DEFAULT_CKPT_BASE = Path("/data1/aminur/om/prithvi/FairRSFM_unified/checkpoints/satmae/pretrain-vit-base-e199.pth")
+
+DEFAULT_CKPT_LARGE = BASE_DIR / "checkpoints/satmae/pretrain-vit-large-e199.pth"
+if not DEFAULT_CKPT_LARGE.exists():
+    DEFAULT_CKPT_LARGE = DEFAULT_CKPT_BASE
+
+NUM_CLASSES  = len(DYNAMIC_WORLD_CLASSES)  # 9
+IGNORE_INDEX = -1
+CLASS_NAMES  = DYNAMIC_WORLD_CLASSES
+
+SATMAE_S2_BANDS = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12"]
+
+BATCH_SIZE   = 32
+EPOCHS       = 50
+LR           = 1e-3
+WEIGHT_DECAY = 1e-4
+ETA_Q        = 0.01
+SEED         = 42
+NUM_WORKERS  = 8
+IMAGE_SIZE   = 96
+FREEZE_BACKBONE = True
+
+EARLY_STOP_PATIENCE  = 1000
+EARLY_STOP_MIN_DELTA = 1e-4
+
+BIOME_MACRO_GROUPS = {
+    1:  "high biomass",
+    3:  "high biomass",
+    5:  "high biomass",
+    2:  "High amplitude phenological",
+    6:  "High amplitude phenological",
+    4:  "High amplitude phenological",
+    7:  "transitional herbaceous & scrub",
+    8:  "transitional herbaceous & scrub",
+    12: "transitional herbaceous & scrub",
+    10: "cryospheric & short-cycle",
+    11: "cryospheric & short-cycle",
+    13: "xeric & mineralogical",
+    9:  "hydrologically modulated",
+    14: "hydrologically modulated",
+}
+
+
+def load_tile_info_dict(data_root: Path) -> dict:
+    tile_info_path = find_one(data_root, "*tile_info.json")
+    with open(tile_info_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def get_macro_biome(tile_info_dict: dict, tile_id: str) -> str:
+    if tile_id not in tile_info_dict:
+        return "Unknown"
+    info = tile_info_dict[tile_id]
+    b_idx = info.get("biome", None)
+    if b_idx is None:
+        return "Unknown"
+    key = int(b_idx) + 1
+    return BIOME_MACRO_GROUPS.get(key, "Unknown")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. DATASET WRAPPER
+# ─────────────────────────────────────────────────────────────────────────────
+
+class MMEarthDatasetWrapper(torch.utils.data.Dataset):
+    def __init__(self, dataset: MMEarthDynamicWorldSegmentationDataset, augment: bool = False):
+        super().__init__()
+        self.dataset = dataset
+        self.augment = augment
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        item = self.dataset[idx]
+        x = item["image"]
+        y = item["mask"].squeeze(0).long()
+        sid = str(item["filename"])
+
+        if self.augment:
+            if torch.rand(1).item() > 0.5:
+                x = torch.flip(x, dims=[-1])
+                y = torch.flip(y, dims=[-1])
+            if torch.rand(1).item() > 0.5:
+                x = torch.flip(x, dims=[-2])
+                y = torch.flip(y, dims=[-2])
+
+        return x, y, sid
+
+
+def print_split_biome_distribution(split_name: str, dataset: MMEarthDatasetWrapper, tile_info_dict: dict):
+    counts = defaultdict(int)
+    h5 = dataset.dataset._file()
+    metadata = h5["metadata"][:]
+    for idx in dataset.dataset.indices:
+        tile_id = metadata[idx]["tile_id"].decode("utf-8")
+        b = get_macro_biome(tile_info_dict, tile_id)
+        counts[b] += 1
+        
+    print(f"  [{split_name.upper()} Split] Total samples: {len(dataset):,}")
+    for b in sorted(counts.keys()):
+        print(f"    • {b:<36} : {counts[b]:,}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. SATMAE SEGMENTATION LINEAR PROBE ARCHITECTURE
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SatMAESegmentationLinearProbe(nn.Module):
+    def __init__(
+        self,
+        model_type: str = "vit_large_patch16",
+        img_size: int = 96,
+        patch_size: int = 8,
+        in_chans: int = 10,
+        num_classes: int = 9,
+        checkpoint_path: str = None,
+        freeze_backbone: bool = True
+    ):
+        super().__init__()
+        self.model_type = model_type
+        self.freeze_backbone = freeze_backbone
+        self.img_size = img_size
+        self.patch_size = patch_size
+        self.grid_size = img_size // patch_size
+        self.G = 3
+
+        channel_groups = ((0, 1, 2, 6), (3, 4, 5, 7), (8, 9))
+
+        if hasattr(models_vit_group_channels, model_type):
+            fn = getattr(models_vit_group_channels, model_type)
+            self.backbone = fn(
+                img_size=img_size,
+                patch_size=patch_size,
+                in_chans=in_chans,
+                channel_groups=channel_groups,
+                global_pool=False
+            )
+        else:
+            raise ValueError(f"Unknown model_type '{model_type}' in models_vit_group_channels")
+
+        self.embed_dim = self.backbone.embed_dim
+
+        if checkpoint_path and os.path.exists(checkpoint_path):
+            self.load_pretrained_weights(checkpoint_path)
+
+        if freeze_backbone:
+            for p in self.backbone.parameters():
+                p.requires_grad = False
+            self.backbone.eval()
+
+        self.probe_head = nn.Sequential(
+            nn.BatchNorm2d(self.G * self.embed_dim, affine=False),
+            nn.Conv2d(self.G * self.embed_dim, num_classes, kernel_size=1)
+        )
+
+    def load_pretrained_weights(self, ckpt_path: str):
+        print(f"[SatMAE] Loading pretrained weights from {ckpt_path}...")
+        ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        state_dict = ckpt.get("model", ckpt.get("state_dict", ckpt))
+
+        model_dict = self.backbone.state_dict()
+        filtered_dict = {}
+        for k, v in state_dict.items():
+            if k in model_dict and v.shape == model_dict[k].shape:
+                filtered_dict[k] = v
+
+        missing, unexpected = self.backbone.load_state_dict(filtered_dict, strict=False)
+        print(f"[SatMAE] Loaded {len(filtered_dict)}/{len(model_dict)} layers successfully.")
+
+    def forward_features_spatial(self, x: torch.Tensor) -> torch.Tensor:
+        b, c, h, w = x.shape
+        bb = self.backbone
+        x_c_embed = []
+        for i, group in enumerate(bb.channel_groups):
+            x_c = x[:, group, :, :]
+            x_c_embed.append(bb.patch_embed[i](x_c))
+
+        x_tokens = torch.stack(x_c_embed, dim=1)
+        _, G_bb, L, D_bb = x_tokens.shape
+
+        channel_embed = bb.channel_embed.unsqueeze(2)
+        pos_embed = bb.pos_embed[:, 1:, :].unsqueeze(1)
+
+        channel_embed = channel_embed.expand(-1, -1, pos_embed.shape[2], -1)
+        pos_embed = pos_embed.expand(-1, channel_embed.shape[1], -1, -1)
+        pos_channel = torch.cat((pos_embed, channel_embed), dim=-1)
+
+        x_tokens = x_tokens + pos_channel
+        x_tokens = x_tokens.view(b, -1, D_bb)
+
+        cls_pos_channel = torch.cat((bb.pos_embed[:, :1, :], bb.channel_cls_embed), dim=-1)
+        cls_tokens = cls_pos_channel + bb.cls_token.expand(b, -1, -1)
+        x_tokens = torch.cat((cls_tokens, x_tokens), dim=1)
+        x_tokens = bb.pos_drop(x_tokens)
+
+        for blk in bb.blocks:
+            x_tokens = blk(x_tokens)
+
+        patches = x_tokens[:, 1:, :]
+        patches = patches.view(b, self.G, L, self.embed_dim)
+        patches = patches.permute(0, 2, 1, 3).reshape(b, L, self.G * self.embed_dim)
+        spatial_features = patches.permute(0, 2, 1).view(b, self.G * self.embed_dim, self.grid_size, self.grid_size)
+        return spatial_features
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        b, c, h, w = x.shape
+        if self.freeze_backbone:
+            self.backbone.eval()
+            with torch.no_grad():
+                feats = self.forward_features_spatial(x)
+        else:
+            feats = self.forward_features_spatial(x)
+
+        logits = self.probe_head(feats)
+        logits = F.interpolate(logits, size=(h, w), mode="bilinear", align_corners=False)
+        return logits
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. EXACT METRIC FUNCTIONS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def compute_miou(y_true_flat: np.ndarray, y_pred_flat: np.ndarray, num_classes: int, ignore_index: int = -1) -> float:
+    mask    = y_true_flat != ignore_index
+    y_true  = y_true_flat[mask]
+    y_pred  = y_pred_flat[mask]
+    present = [c for c in range(num_classes) if (y_true == c).sum() > 0]
+    if not present:
+        return float("nan")
+    ious = []
+    for c in present:
+        tp    = ((y_pred == c) & (y_true == c)).sum()
+        fp    = ((y_pred == c) & (y_true != c)).sum()
+        fn    = ((y_pred != c) & (y_true == c)).sum()
+        denom = tp + fp + fn
+        ious.append(float(tp / denom) if denom > 0 else float("nan"))
+    valid = [v for v in ious if not np.isnan(v)]
+    return float(np.mean(valid)) if valid else float("nan")
+
+
+def compute_per_class_iou(y_true_flat: np.ndarray, y_pred_flat: np.ndarray, num_classes: int, ignore_index: int = -1) -> np.ndarray:
+    mask    = y_true_flat != ignore_index
+    y_true  = y_true_flat[mask]
+    y_pred  = y_pred_flat[mask]
+    ious = np.full(num_classes, float("nan"))
+    for c in range(num_classes):
+        if (y_true == c).sum() == 0:
+            continue
+        tp    = ((y_pred == c) & (y_true == c)).sum()
+        fp    = ((y_pred == c) & (y_true != c)).sum()
+        fn    = ((y_pred != c) & (y_true == c)).sum()
+        denom = tp + fp + fn
+        ious[c] = float(tp / denom) if denom > 0 else float("nan")
+    return ious
+
+
+def compute_macro_f1_seg(y_true_flat: np.ndarray, y_pred_flat: np.ndarray, num_classes: int, ignore_index: int = -1) -> float:
+    mask   = y_true_flat != ignore_index
+    y_true = y_true_flat[mask]
+    y_pred = y_pred_flat[mask]
+    present = [c for c in range(num_classes) if (y_true == c).sum() > 0]
+    if not present:
+        return float("nan")
+    f1s = []
+    for c in present:
+        tp    = ((y_pred == c) & (y_true == c)).sum()
+        fp    = ((y_pred == c) & (y_true != c)).sum()
+        fn    = ((y_pred != c) & (y_true == c)).sum()
+        denom = 2 * tp + fp + fn
+        f1s.append(float(2 * tp / denom) if denom > 0 else float("nan"))
+    valid = [v for v in f1s if not np.isnan(v)]
+    return float(np.mean(valid)) if valid else float("nan")
+
+
+def compute_ece_seg(y_true_flat: np.ndarray, probs_max: np.ndarray, preds_flat: np.ndarray, ignore_index: int = -1, n_bins: int = 10) -> float:
+    mask       = y_true_flat != ignore_index
+    y_true     = y_true_flat[mask]
+    probs_max  = probs_max[mask]
+    preds_flat = preds_flat[mask]
+    if len(y_true) == 0:
+        return float("nan")
+    correct = (preds_flat == y_true).astype(float)
+    ece, n  = 0.0, len(y_true)
+    for lo, hi in zip(np.linspace(0, 1, n_bins + 1)[:-1], np.linspace(0, 1, n_bins + 1)[1:]):
+        m = (probs_max >= lo) & (probs_max < hi)
+        if m.sum() == 0:
+            continue
+        ece += (m.sum() / n) * abs(correct[m].mean() - probs_max[m].mean())
+    return float(ece)
+
+
+def compute_gini(values: list) -> float:
+    vals = [float(v) for v in values if v is not None and not np.isnan(v)]
+    if len(vals) < 2:
+        return 0.0
+    arr = np.sort(np.array(vals))
+    n = len(arr)
+    sum_val = np.sum(arr)
+    if sum_val == 0:
+        return 0.0
+    index = np.arange(1, n + 1)
+    return float(np.sum((2 * index - n - 1) * arr) / (n * sum_val))
+
+
+def compute_eqodds_seg(biome_data: dict, num_classes: int, ignore_index: int = -1) -> float:
+    biomes = sorted([b for b in biome_data.keys() if b != "Unknown" and len(biome_data[b]["true"]) > 0])
+    if len(biomes) < 2:
+        return float("nan")
+    J = {}
+    for b in biomes:
+        yt = np.concatenate(biome_data[b]["true"])
+        yp = np.concatenate(biome_data[b]["pred"])
+        mask = yt != ignore_index
+        yt_v = yt[mask]
+        yp_v = yp[mask]
+        j_b = np.full(num_classes, float("nan"))
+        for c in range(num_classes):
+            yt_c = (yt_v == c).astype(int)
+            yp_c = (yp_v == c).astype(int)
+            tp = ((yp_c == 1) & (yt_c == 1)).sum()
+            fn = ((yp_c == 0) & (yt_c == 1)).sum()
+            fp = ((yp_c == 1) & (yt_c == 0)).sum()
+            tn = ((yp_c == 0) & (yt_c == 0)).sum()
+            tpr = tp / (tp + fn) if (tp + fn) > 0 else float("nan")
+            fpr = fp / (fp + tn) if (fp + tn) > 0 else float("nan")
+            if not (np.isnan(tpr) or np.isnan(fpr)):
+                j_b[c] = tpr - fpr
+        J[b] = j_b
+
+    worst = 0.0
+    for i, b1 in enumerate(biomes):
+        for b2 in biomes[i+1:]:
+            diffs = [abs(J[b1][c] - J[b2][c]) for c in range(num_classes) if not (np.isnan(J[b1][c]) or np.isnan(J[b2][c]))]
+            if diffs:
+                worst = max(worst, float(np.mean(diffs)))
+    return worst
+
+
+def compute_demographic_parity_seg(biome_data: dict, num_classes: int, ignore_index: int = -1) -> float:
+    biomes = sorted([b for b in biome_data.keys() if b != "Unknown" and len(biome_data[b]["true"]) > 0])
+    if len(biomes) < 2:
+        return float("nan")
+    PPR = {}
+    for b in biomes:
+        yp = np.concatenate(biome_data[b]["pred"])
+        yt = np.concatenate(biome_data[b]["true"])
+        mask = yt != ignore_index
+        yp_v = yp[mask]
+        ppr_b = np.zeros(num_classes)
+        for c in range(num_classes):
+            ppr_b[c] = (yp_v == c).mean() if len(yp_v) > 0 else 0.0
+        PPR[b] = ppr_b
+
+    worst = 0.0
+    for i, b1 in enumerate(biomes):
+        for b2 in biomes[i+1:]:
+            worst = max(worst, float(np.mean(np.abs(PPR[b1] - PPR[b2]))))
+    return worst
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. LIGHTNING MODULE (GROUP DRO SEGMENTATION)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SatMAEGroupDROSegmentationLightningModule(L.LightningModule):
+    def __init__(self, model: nn.Module, tile_info_dict: dict, lr: float,
+                 eta_q: float = ETA_Q, weight_decay: float = WEIGHT_DECAY, num_classes: int = NUM_CLASSES):
+        super().__init__()
+        self.save_hyperparameters(ignore=["model", "tile_info_dict"])
+        self.model          = model
+        self.tile_info_dict = tile_info_dict
+        self.num_classes    = num_classes
+        self.eta_q          = eta_q
+
+        known_biomes = sorted(set(BIOME_MACRO_GROUPS.values()))
+        self.biome_to_idx = {b: i for i, b in enumerate(known_biomes)}
+        self.num_biomes = len(known_biomes)
+
+        self.register_buffer("q", torch.ones(self.num_biomes, dtype=torch.float32) / self.num_biomes)
+        self._last_group_losses = None
+        self._last_active_mask = None
+
+        if FREEZE_BACKBONE:
+            frozen    = sum(p.numel() for p in self.model.backbone.parameters())
+            trainable = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+            print(f"\n[Model Architecture] Frozen Backbone : {frozen/1e6:.2f}M params")
+            print(f"[Model Architecture] Trainable Probe  : {trainable/1e3:.2f}K params")
+
+    def on_save_checkpoint(self, checkpoint):
+        if FREEZE_BACKBONE:
+            state_dict = checkpoint.get("state_dict", {})
+            keys_to_remove = [k for k in list(state_dict.keys()) if k.startswith("model.backbone.")]
+            for k in keys_to_remove:
+                del state_dict[k]
+
+    def on_load_checkpoint(self, checkpoint):
+        if FREEZE_BACKBONE:
+            state_dict = checkpoint.get("state_dict", {})
+            for k, v in self.model.backbone.state_dict().items():
+                state_dict[f"model.backbone.{k}"] = v
+
+    def forward(self, x):
+        return self.model(x)
+
+    def training_step(self, batch, batch_idx):
+        x, y, sample_ids = batch
+        logits = self(x)
+        raw_losses = F.cross_entropy(logits, y, ignore_index=IGNORE_INDEX, reduction="none").mean(dim=(1, 2))
+
+        group_losses = torch.zeros(self.num_biomes, device=self.device)
+        group_counts = torch.zeros(self.num_biomes, device=self.device)
+
+        for i, sid in enumerate(sample_ids):
+            biome = get_macro_biome(self.tile_info_dict, str(sid))
+            b_idx = self.biome_to_idx.get(biome, None)
+            if b_idx is not None:
+                group_losses[b_idx] += raw_losses[i]
+                group_counts[b_idx] += 1
+
+        active_mask = group_counts > 0
+        avg_group_losses = torch.zeros_like(group_losses)
+        avg_group_losses[active_mask] = group_losses[active_mask] / group_counts[active_mask]
+
+        self._last_group_losses = avg_group_losses.detach()
+        self._last_active_mask = active_mask
+
+        q_detached = self.q.clone().detach()
+        loss = torch.sum(q_detached * avg_group_losses)
+
+        self.log("train/loss", loss, prog_bar=True, on_step=True, on_epoch=True, batch_size=x.size(0))
+        return loss
+
+    def on_train_batch_end(self, outputs, batch, batch_idx):
+        if self._last_group_losses is not None and self._last_active_mask is not None:
+            with torch.no_grad():
+                q_updated = self.q.clone()
+                q_updated[self._last_active_mask] *= torch.exp(self.eta_q * self._last_group_losses[self._last_active_mask])
+                q_sum = q_updated.sum()
+                if q_sum > 0:
+                    self.q.copy_(q_updated / q_sum)
+
+    def validation_step(self, batch, batch_idx):
+        x, y, sample_ids = batch
+        logits = self(x)
+        loss = F.cross_entropy(logits, y, ignore_index=IGNORE_INDEX)
+        self.log("val/loss", loss, prog_bar=True, add_dataloader_idx=False, batch_size=x.size(0))
+        return {"logits": logits, "y": y, "sample_ids": sample_ids}
+
+    def test_step(self, batch, batch_idx):
+        x, y, sample_ids = batch
+        logits = self(x)
+        loss = F.cross_entropy(logits, y, ignore_index=IGNORE_INDEX)
+        self.log("test/loss", loss, add_dataloader_idx=False, batch_size=x.size(0))
+        return {"logits": logits, "y": y, "sample_ids": sample_ids}
+
+    def configure_optimizers(self):
+        trainable = [p for p in self.model.parameters() if p.requires_grad]
+        optimizer = torch.optim.AdamW(trainable, lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS, eta_min=1e-6)
+        return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler, "monitor": "val/miou"}}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. LOGGERS & EVALUATION CALLBACKS
+# ─────────────────────────────────────────────────────────────────────────────
+
+class GlobalSegmentationLogger(Callback):
+    def __init__(self, num_classes: int):
+        super().__init__()
+        self.num_classes = num_classes
+
+    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
+        if trainer.sanity_checking:
+            return
+        if not hasattr(pl_module, "_val_y_true") or pl_module._val_y_true is None:
+            pl_module._val_y_true = []
+            pl_module._val_y_pred = []
+
+        logits = outputs["logits"].detach().float()
+        labels = outputs["y"].detach().cpu().numpy()
+        preds  = logits.argmax(dim=1).cpu().numpy()
+
+        pl_module._val_y_true.append(labels.reshape(-1))
+        pl_module._val_y_pred.append(preds.reshape(-1))
+
+    def on_validation_epoch_end(self, trainer, pl_module):
+        if trainer.sanity_checking or not hasattr(pl_module, "_val_y_true") or pl_module._val_y_true is None:
+            return
+        y_true = np.concatenate(pl_module._val_y_true, axis=0)
+        y_pred = np.concatenate(pl_module._val_y_pred, axis=0)
+
+        miou = compute_miou(y_true, y_pred, self.num_classes, ignore_index=IGNORE_INDEX)
+        f1   = compute_macro_f1_seg(y_true, y_pred, self.num_classes, ignore_index=IGNORE_INDEX)
+
+        pl_module.log("val/miou", miou, prog_bar=True, logger=True)
+        pl_module.log("val/macro_f1", f1, prog_bar=False, logger=True)
+
+        pl_module._val_y_true = None
+        pl_module._val_y_pred = None
+
+
+class BiomeSegmentationLogger(Callback):
+    def __init__(self, tile_info_dict: dict, num_classes: int, class_names: list, output_dir: Path, test_loader: DataLoader = None):
+        super().__init__()
+        self.tile_info_dict = tile_info_dict
+        self.num_classes    = num_classes
+        self.class_names    = class_names
+        self.output_dir     = output_dir
+        self.test_loader    = test_loader
+
+        self.val_history  = []
+        self.test_history = []
+
+        val_file = self.output_dir / "val_results.json"
+        if val_file.exists():
+            try:
+                with open(val_file, "r") as f:
+                    content = json.load(f)
+                    if isinstance(content, list):
+                        self.val_history = content
+                    elif isinstance(content, dict):
+                        self.val_history = [content]
+            except Exception:
+                pass
+
+        test_file = self.output_dir / "test_results.json"
+        if test_file.exists():
+            try:
+                with open(test_file, "r") as f:
+                    content = json.load(f)
+                    if isinstance(content, list):
+                        self.test_history = content
+                    elif isinstance(content, dict):
+                        self.test_history = [content]
+            except Exception:
+                pass
+
+    def _init_biome_data(self):
+        return defaultdict(lambda: {"true": [], "pred": [], "probs_max": [], "sample_ids": []})
+
+    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
+        if trainer.sanity_checking:
+            return
+        if not hasattr(pl_module, "_biome_data_val") or pl_module._biome_data_val is None:
+            pl_module._biome_data_val = self._init_biome_data()
+
+        logits     = outputs["logits"].detach().float()
+        labels     = outputs["y"].detach().cpu().numpy()
+        sample_ids = outputs["sample_ids"]
+
+        probs     = torch.softmax(logits, dim=1)
+        probs_max = probs.max(dim=1).values.cpu().numpy()
+        preds     = logits.argmax(dim=1).cpu().numpy()
+
+        for i, sid in enumerate(sample_ids):
+            group = get_macro_biome(self.tile_info_dict, str(sid))
+            if group == "Unknown":
+                continue
+            pl_module._biome_data_val[group]["true"].append(labels[i].reshape(-1))
+            pl_module._biome_data_val[group]["pred"].append(preds[i].reshape(-1))
+            pl_module._biome_data_val[group]["probs_max"].append(probs_max[i].reshape(-1))
+            pl_module._biome_data_val[group]["sample_ids"].append(str(sid))
+
+    def _compute_and_log(self, biome_data, epoch, tb, section_title, prefix, pl_module=None):
+        biomes = sorted([b for b in biome_data.keys() if b != "Unknown" and len(biome_data[b]["true"]) > 0])
+        if not biomes:
+            return {}
+
+        all_true = np.concatenate([np.concatenate(biome_data[b]["true"]) for b in biomes], axis=0)
+        all_pred = np.concatenate([np.concatenate(biome_data[b]["pred"]) for b in biomes], axis=0)
+        all_pmax = np.concatenate([np.concatenate(biome_data[b]["probs_max"]) for b in biomes], axis=0)
+
+        global_miou = compute_miou(all_true, all_pred, self.num_classes, ignore_index=IGNORE_INDEX)
+        global_f1   = compute_macro_f1_seg(all_true, all_pred, self.num_classes, ignore_index=IGNORE_INDEX)
+        global_ece  = compute_ece_seg(all_true, all_pmax, all_pred, ignore_index=IGNORE_INDEX)
+
+        biome_mious, biome_f1s, biome_eces, biome_counts = {}, {}, {}, {}
+        per_group_metrics = {}
+        per_class_iou_by_biome = {}
+
+        for b in biomes:
+            yt = np.concatenate(biome_data[b]["true"])
+            yp = np.concatenate(biome_data[b]["pred"])
+            pm = np.concatenate(biome_data[b]["probs_max"])
+
+            b_miou  = compute_miou(yt, yp, self.num_classes, ignore_index=IGNORE_INDEX)
+            b_f1    = compute_macro_f1_seg(yt, yp, self.num_classes, ignore_index=IGNORE_INDEX)
+            b_ece   = compute_ece_seg(yt, pm, yp, ignore_index=IGNORE_INDEX)
+            b_count = len(biome_data[b]["sample_ids"])
+
+            biome_mious[b]  = b_miou
+            biome_f1s[b]    = b_f1
+            biome_eces[b]   = b_ece
+            biome_counts[b] = b_count
+
+            per_group_metrics[b] = {
+                "miou": b_miou,
+                "macro_f1": b_f1,
+                "ece": b_ece,
+                "sample_count": b_count,
+            }
+
+            per_class_iou_by_biome[b] = compute_per_class_iou(yt, yp, self.num_classes, ignore_index=IGNORE_INDEX)
+
+        per_class_iou_table = {}
+        class_disparities = {}
+        for c in range(self.num_classes):
+            c_name = self.class_names[c] if c < len(self.class_names) else f"Class_{c}"
+            c_scores = {}
+            c_vals = []
+            for b in biomes:
+                val = per_class_iou_by_biome[b][c]
+                if not np.isnan(val):
+                    c_scores[b] = float(val)
+                    c_vals.append(float(val))
+            per_class_iou_table[c_name] = c_scores
+            class_disparities[c_name] = float(max(c_vals) - min(c_vals)) if len(c_vals) >= 2 else 0.0
+
+        class_disp_vals = list(class_disparities.values())
+        mean_class_disp = float(np.mean(class_disp_vals)) if class_disp_vals else 0.0
+        max_class_disp  = float(np.max(class_disp_vals)) if class_disp_vals else 0.0
+
+        miou_vals = [v for v in biome_mious.values() if not np.isnan(v)]
+        worst_miou = min(miou_vals) if miou_vals else float("nan")
+        best_miou  = max(miou_vals) if miou_vals else float("nan")
+        mean_miou  = float(np.mean(miou_vals)) if miou_vals else float("nan")
+        miou_std   = float(np.std(miou_vals)) if miou_vals else 0.0
+        per        = (worst_miou / best_miou) if (best_miou > 0 and not np.isnan(worst_miou)) else 0.0
+        nfr        = (best_miou - worst_miou) / global_miou if global_miou > 0 else float("nan")
+        gini       = compute_gini(miou_vals)
+
+        ece_vals   = [v for v in biome_eces.values() if not np.isnan(v)]
+        ece_disp   = (max(ece_vals) - min(ece_vals)) if ece_vals else float("nan")
+        eq_odds    = compute_eqodds_seg(biome_data, self.num_classes, ignore_index=IGNORE_INDEX)
+        dp_disp    = compute_demographic_parity_seg(biome_data, self.num_classes, ignore_index=IGNORE_INDEX)
+
+        if prefix == "val" and pl_module is not None:
+            pl_module.log("val/worst_case_miou", worst_miou, prog_bar=True, logger=True)
+            pl_module.log("val/performance_equity_ratio", per, prog_bar=False, logger=True)
+
+        res_dict = {
+            "epoch": epoch,
+            "overall_miou": global_miou,
+            "overall_macro_f1": global_f1,
+            "overall_ece": global_ece,
+            "global_miou": global_miou,
+            "global_macro_f1": global_f1,
+            "worst_case_miou": worst_miou,
+            "best_case_miou": best_miou,
+            "group_mean_miou": mean_miou,
+            "group_miou_std": miou_std,
+            "performance_equity_ratio": per,
+            "normalized_fairness_range": nfr,
+            "gini_coefficient": gini,
+            "ece_disparity": ece_disp,
+            "equalized_odds_disparity": eq_odds,
+            "demographic_parity_disparity": dp_disp,
+            "mean_class_disparity": mean_class_disp,
+            "max_class_disparity": max_class_disp,
+            "per_group_metrics": per_group_metrics,
+            "per_biome_miou": biome_mious,
+            "per_biome_macro_f1": biome_f1s,
+            "per_biome_ece": biome_eces,
+            "per_biome_counts": biome_counts,
+            "class_disparities": class_disparities,
+            "per_class_iou_table": per_class_iou_table,
+        }
+
+        if prefix == "val":
+            self.val_history = [h for h in self.val_history if h.get("epoch") != epoch]
+            self.val_history.append(res_dict)
+            self.val_history.sort(key=lambda x: x.get("epoch", 0))
+            with open(self.output_dir / "val_results.json", "w") as f:
+                json.dump(self.val_history, f, indent=2)
+        elif prefix == "test":
+            self.test_history = [h for h in self.test_history if h.get("epoch") != epoch]
+            self.test_history.append(res_dict)
+            self.test_history.sort(key=lambda x: x.get("epoch", 0))
+            with open(self.output_dir / "test_results.json", "w") as f:
+                json.dump(self.test_history, f, indent=2)
+
+        return res_dict
+
+    def on_validation_epoch_end(self, trainer, pl_module):
+        if trainer.sanity_checking or not hasattr(pl_module, "_biome_data_val") or pl_module._biome_data_val is None:
+            return
+        epoch = trainer.current_epoch
+        tb    = trainer.logger.experiment if trainer.logger else None
+
+        val_res = self._compute_and_log(pl_module._biome_data_val, epoch, tb, "group_metrics_val", "val", pl_module=pl_module)
+        pl_module._biome_data_val = None
+
+        if getattr(self, "test_loader", None) is not None:
+            self._eval_test_split(trainer, pl_module, epoch, tb)
+
+    def _eval_test_split(self, trainer, pl_module, epoch, tb):
+        pl_module.eval()
+        test_biome_data = self._init_biome_data()
+        device = pl_module.device
+
+        with torch.no_grad():
+            for batch in self.test_loader:
+                x, y, sample_ids = batch
+                x = x.to(device)
+                logits = pl_module(x)
+                labels = y.numpy()
+                probs  = torch.softmax(logits, dim=1)
+                probs_max = probs.max(dim=1).values.cpu().numpy()
+                preds     = logits.argmax(dim=1).cpu().numpy()
+
+                for i, sid in enumerate(sample_ids):
+                    group = get_macro_biome(self.tile_info_dict, str(sid))
+                    if group == "Unknown":
+                        continue
+                    test_biome_data[group]["true"].append(labels[i].reshape(-1))
+                    test_biome_data[group]["pred"].append(preds[i].reshape(-1))
+                    test_biome_data[group]["probs_max"].append(probs_max[i].reshape(-1))
+                    test_biome_data[group]["sample_ids"].append(str(sid))
+
+        test_res = self._compute_and_log(test_biome_data, epoch, tb, "group_metrics_test", "test", pl_module=None)
+        
+        print(f"\n── [Epoch {epoch:02d} Results] ──────────────────────────────────────────")
+        print(f"   Val  mIoU: {trainer.callback_metrics.get('val/miou', 0.0):.4f} | Worst: {trainer.callback_metrics.get('val/worst_case_miou', 0.0):.4f} | PER: {trainer.callback_metrics.get('val/performance_equity_ratio', 0.0):.4f}")
+        if test_res:
+            print(f"   Test mIoU: {test_res['global_miou']:.4f} | Worst: {test_res['worst_case_miou']:.4f} | PER: {test_res['performance_equity_ratio']:.4f} | Macro F1: {test_res['global_macro_f1']:.4f}")
+        print("────────────────────────────────────────────────────────────────────────\n")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 8. MAIN EXECUTION
+# ─────────────────────────────────────────────────────────────────────────────
+
+def main():
+    logging.getLogger("lightning.pytorch").setLevel(logging.WARNING)
+
+    parser = argparse.ArgumentParser(description="SatMAE MMEarth-20k Group DRO Linear Probe Training")
+    parser.add_argument("--seed", type=int, default=SEED, help="Random seed (default: 42)")
+    parser.add_argument("--gpu", type=str, default="0", help="CUDA GPU device ID (default: 0)")
+    parser.add_argument("--epochs", type=int, default=EPOCHS, help="Number of training epochs (default: 50)")
+    parser.add_argument("--batch-size", type=int, default=BATCH_SIZE, help="Batch size (default: 32)")
+    parser.add_argument("--lr", type=float, default=LR, help="Learning rate (default: 1e-3)")
+    parser.add_argument("--weight-decay", type=float, default=WEIGHT_DECAY, help="Weight decay (default: 1e-4)")
+    parser.add_argument("--eta-q", type=float, default=ETA_Q, help="Group DRO step size eta_q (default: 0.01)")
+    parser.add_argument("--model-size", type=str, default="base", choices=["base", "large"], help="SatMAE model size (default: large)")
+    parser.add_argument("--ckpt-path", type=str, default=None, help="Custom path to pretrained SatMAE weights (.pth)")
+    parser.add_argument("--out-dir", type=str, default=None, help="Custom output directory")
+    args = parser.parse_args()
+
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
+    seed = args.seed
+    L.seed_everything(seed)
+
+    if args.model_size == "large":
+        model_type = "vit_large_patch16"
+        ckpt_path = Path(args.ckpt_path) if args.ckpt_path else DEFAULT_CKPT_LARGE
+    else:
+        model_type = "vit_base_patch16"
+        ckpt_path = Path(args.ckpt_path) if args.ckpt_path else DEFAULT_CKPT_BASE
+
+    mode_str = f"satmae_mmearth_lp_groupdro_{args.model_size}"
+    if args.out_dir:
+        OUT_DIR = Path(args.out_dir)
+    else:
+        OUT_DIR = CURRENT_DIR / f"runs/mmearth_lp_groupdro/seed_{seed}"
+
+    CKPT_DIR = OUT_DIR / "checkpoints"
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    CKPT_DIR.mkdir(parents=True, exist_ok=True)
+
+    sys.stdout = TeeLogger(OUT_DIR / "train.log")
+    sys.stderr = sys.stdout
+
+    print("══════════════════════════════════════════════════════════════════════")
+    print(f" SatMAE MMEarth-20k Group DRO Linear Probe (Seed {seed})")
+    print(f" Model Type  : {model_type} (patch_size=8, img_size=96, 10 Sentinel bands)")
+    print(f" Checkpoint  : {ckpt_path}")
+    print(f" Output Dir  : {OUT_DIR}")
+    print(f" DRO eta_q   : {args.eta_q}")
+    print("══════════════════════════════════════════════════════════════════════\n")
+
+    tile_info_dict = load_tile_info_dict(DATA_ROOT)
+
+    datamodule = MMEarthDynamicWorldSegmentationDataModule(
+        data_root              = DATA_ROOT,
+        sentinel2_bands        = SATMAE_S2_BANDS,
+        batch_size             = args.batch_size,
+        num_workers            = NUM_WORKERS,
+        image_size             = IMAGE_SIZE,
+        normalize              = True,
+        fallback_val_fraction  = 0.1,
+        fallback_test_fraction = 0.1,
+        seed                   = seed,
+    )
+    datamodule.setup("fit")
+    datamodule.setup("test")
+
+    train_ds = MMEarthDatasetWrapper(datamodule.train_dataset, augment=True)
+    val_ds   = MMEarthDatasetWrapper(datamodule.val_dataset,   augment=False)
+    test_ds  = MMEarthDatasetWrapper(datamodule.test_dataset,  augment=False)
+
+    print("Split macro biome distributions:")
+    print_split_biome_distribution("train", train_ds, tile_info_dict)
+    print_split_biome_distribution("val",   val_ds,   tile_info_dict)
+    print_split_biome_distribution("test",  test_ds,  tile_info_dict)
+    print()
+
+    base_model = SatMAESegmentationLinearProbe(
+        model_type=model_type,
+        img_size=IMAGE_SIZE,
+        patch_size=8,
+        in_chans=10,
+        num_classes=NUM_CLASSES,
+        checkpoint_path=str(ckpt_path) if ckpt_path.exists() else None,
+        freeze_backbone=FREEZE_BACKBONE
+    )
+
+    pl_model = SatMAEGroupDROSegmentationLightningModule(
+        model=base_model,
+        tile_info_dict=tile_info_dict,
+        lr=args.lr,
+        eta_q=args.eta_q,
+        weight_decay=args.weight_decay,
+        num_classes=NUM_CLASSES
+    )
+
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
+                              num_workers=NUM_WORKERS, pin_memory=True, persistent_workers=True)
+    val_loader   = DataLoader(val_ds,   batch_size=args.batch_size, shuffle=False,
+                              num_workers=NUM_WORKERS, pin_memory=True, persistent_workers=True)
+    test_loader  = DataLoader(test_ds,  batch_size=args.batch_size, shuffle=False,
+                              num_workers=NUM_WORKERS, pin_memory=True, persistent_workers=True)
+
+    CKPT_MACRO_DIR = CKPT_DIR / "best_macro_iou"
+    CKPT_WORST_DIR = CKPT_DIR / "best_worst_iou"
+    CKPT_MACRO_DIR.mkdir(parents=True, exist_ok=True)
+    CKPT_WORST_DIR.mkdir(parents=True, exist_ok=True)
+
+    ckpt_macro_cb = ModelCheckpoint(
+        monitor                 = "val/miou",
+        mode                    = "max",
+        dirpath                 = CKPT_MACRO_DIR,
+        filename                = f"{mode_str}-miou-epoch={{epoch:02d}}-val_miou={{val/miou:.4f}}",
+        auto_insert_metric_name = False,
+        save_top_k              = 3,
+        save_last               = True,
+        save_weights_only       = False,
+        verbose                 = False,
+    )
+    ckpt_worst_cb = ModelCheckpoint(
+        monitor                 = "val/worst_case_miou",
+        mode                    = "max",
+        dirpath                 = CKPT_WORST_DIR,
+        filename                = f"{mode_str}-worst-epoch={{epoch:02d}}-worst_miou={{val/worst_case_miou:.4f}}",
+        auto_insert_metric_name = False,
+        save_top_k              = 3,
+        save_last               = False,
+        save_weights_only       = False,
+        verbose                 = False,
+    )
+    early_stop_cb = EarlyStopping(
+        monitor                 = "val/miou",
+        mode                    = "max",
+        patience                = EARLY_STOP_PATIENCE,
+        min_delta               = EARLY_STOP_MIN_DELTA,
+        check_on_train_epoch_end = False,
+        verbose                 = False,
+    )
+    global_logger_cb = GlobalSegmentationLogger(num_classes=NUM_CLASSES)
+    biome_cb         = BiomeSegmentationLogger(
+        tile_info_dict = tile_info_dict,
+        num_classes    = NUM_CLASSES,
+        class_names    = CLASS_NAMES,
+        output_dir     = OUT_DIR,
+        test_loader    = test_loader,
+    )
+    progress_bar_cb = CleanProgressBar(refresh_rate=20)
+    tb_logger = TensorBoardLogger(save_dir=CURRENT_DIR / "runs", name="tb_logs", version=f"mmearth_groupdro_seed_{seed}")
+
+    trainer = L.Trainer(
+        accelerator             = "gpu",
+        devices                 = 1,
+        strategy                = "auto",
+        precision               = "bf16-mixed",
+        max_epochs              = args.epochs,
+        check_val_every_n_epoch = 1,
+        log_every_n_steps       = 10,
+        logger                  = tb_logger,
+        callbacks               = [global_logger_cb, ckpt_macro_cb, ckpt_worst_cb, early_stop_cb, biome_cb, progress_bar_cb],
+        enable_checkpointing    = True,
+        enable_progress_bar     = True,
+        deterministic           = "warn",
+        benchmark               = False,
+        num_sanity_val_steps    = 2,
+    )
+
+    trainer.fit(pl_model, train_loader, val_loader)
+
+    print(f"\n[Training Complete]")
+    print(f" Best mIoU Checkpoint     : {ckpt_macro_cb.best_model_path}")
+    print(f" Best mIoU Score          : {ckpt_macro_cb.best_model_score:.4f}")
+    if ckpt_worst_cb.best_model_path:
+        print(f" Best Worst Checkpoint    : {ckpt_worst_cb.best_model_path}")
+        print(f" Best Worst Score         : {ckpt_worst_cb.best_model_score:.4f}")
+
+
+if __name__ == "__main__":
+    main()

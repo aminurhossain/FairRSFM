@@ -1,0 +1,10 @@
+method: "GroupDRO"
+full_name: "Group Distributionally Robust Optimization"
+type: "minimax_robust_optimization"
+use_biome_during_training: true
+hyperparameters:
+  group_lr: 0.01
+  lr: 0.001
+  weight_decay: 0.0001
+  optimizer: "AdamW"
+  scheduler: "CosineAnnealingLR"

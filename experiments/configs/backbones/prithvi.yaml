@@ -1,0 +1,16 @@
+name: "prithvi_eo_v2_300m"
+family: "Prithvi"
+developer: "IBM Research & NASA IMPACT"
+architecture: "ViT-Large"
+parameters: 300_000_000
+patch_size: 14
+img_size: 224
+bands:
+  - "BLUE"
+  - "GREEN"
+  - "RED"
+  - "NIR_NARROW"
+  - "SWIR_1"
+  - "SWIR_2"
+checkpoint_url: "https://huggingface.co/ibm-nasa-geospatial/Prithvi-EO-2.0-300M-TL"
+default_checkpoint: "checkpoints/Prithvi_EO_V2_300M_TL.pt"

@@ -5,25 +5,61 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.ipynb_checkpoints/
 
 # Environments and packaging
+.env
 .venv/
+env/
 venv/
+ENV/
 build/
 dist/
 *.egg-info/
 
-# Coverage and test output
+# Coverage and testing
 .coverage
 .coverage.*
 htmlcov/
 
-# Editors and operating systems
+# IDEs and OS metadata
 .idea/
 .vscode/
 .DS_Store
 Thumbs.db
+*.swp
+*.swo
 
-# Experiment artifacts
+# Experiment outputs, logs, and WandB
 experiments/outputs/*
 !experiments/outputs/.gitignore
+DOFA/
+runs/
+runs_mmearth/
+lightning_logs/
+wandb/
+*.log
+slurm-*.out
+*.out
+
+# Model weights and checkpoints (host on Hugging Face / Zenodo)
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.safetensors
+*.onnx
+
+# Datasets, large rasters, and binary caches
+data/
+datasets/
+Geobench/
+MMearth20k/
+*.h5
+*.hdf5
+*.tif
+*.tiff
+*.tar
+*.tar.gz
+*.zip

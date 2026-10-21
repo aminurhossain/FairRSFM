@@ -1,26 +1,53 @@
 # Experiments
 
-This directory is reserved for reproducible FairRSFM experiment definitions.
-Each released experiment will specify the dataset, frozen backbone, mitigation
-method, task head, random seed, and training configuration needed to reproduce
-the corresponding paper result.
+This directory provides the execution runners and reproducible configurations for all 48 FairRSFM benchmark configurations (3 Foundation Models × 4 Datasets × 4 Mitigation Methods).
 
 ```text
 experiments/
+|-- train.py          # Unified CLI training launcher
 |-- configs/
-|   |-- backbones/  # Prithvi-EO-2.0, SatMAE, and DOFA
-|   |-- datasets/   # Dataset and split definitions
-|   |-- methods/    # ERM, DBR, BOLP, and GroupDRO
-|   `-- tasks/      # Classification and segmentation runs
-`-- outputs/        # Local logs, checkpoints, and predictions (not tracked)
+|   |-- backbones/    # Prithvi-EO-2.0, SatMAE, and DOFA specs
+|   |-- datasets/     # EuroSAT, BigEarthNet, SA-Crop, MMEarth specs
+|   |-- methods/      # ERM, DBR, BOLP, and GroupDRO hyperparameters
+|   `-- data_mappings/# Biome lookup JSON mappings
+|-- scripts/          # Canonical experiment scripts
+`-- outputs/          # Local logs, checkpoints, and predictions (not tracked in git)
 ```
 
-Experiment configurations and launch commands are in preparation. Reported
-hyperparameters and results are already available in the [benchmark
-protocol](../docs/benchmark.md) and [complete result tables](../docs/results.md).
+## Running Training
+
+You can launch any experiment via the unified training dispatcher:
+
+```bash
+# General syntax:
+python experiments/train.py --model <prithvi|satmae|dofa> \
+                            --dataset <eurosat|bigearthnet|sa_crop|mmearth> \
+                            --method <erm|dbr|bolp|groupdro> \
+                            --seed <seed>
+
+# Examples:
+# 1. Train SatMAE on BigEarthNet with GroupDRO
+python experiments/train.py --model satmae --dataset bigearthnet --method groupdro --seed 42
+
+# 2. Train Prithvi on EuroSAT with DBR
+python experiments/train.py --model prithvi --dataset eurosat --method dbr --seed 42
+
+# 3. Train DOFA on South Africa Crop Type with BOLP
+python experiments/train.py --model dofa --dataset sa_crop --method bolp --seed 42
+```
+
+### Standard CLI Arguments
+
+* `--model`: Foundation model backbone (`prithvi`, `satmae`, `dofa`).
+* `--dataset`: Benchmark task (`eurosat`, `bigearthnet`, `sa_crop`, `mmearth`).
+* `--method`: Debiasing algorithm (`erm`, `dbr`, `bolp`, `groupdro`).
+* `--seed`: Random seed (default: `42`).
+* `--batch_size`: Batch size per GPU.
+* `--epochs`: Maximum training epochs.
+* `--lr`: Learning rate for task head probe.
+* `--gpu`: GPU device ID (e.g. `0`).
+* `--output_dir`: Output directory for checkpoints and logs (defaults to `experiments/outputs/`).
 
 ## Output Policy
 
-The `outputs/` directory is intentionally excluded from version control except
-for its ignore file. Published artifacts and benchmark metadata will be linked
-from the main repository README rather than committed as generated files.
+The `outputs/` directory is intentionally excluded from version control. Checkpoints and evaluation predictions will be written to `outputs/` during runs without cluttering git tracking.

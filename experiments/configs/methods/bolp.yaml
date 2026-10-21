@@ -1,0 +1,11 @@
+method: "BOLP"
+full_name: "Biome-Orthogonal Linear Probing"
+type: "representation_transformation"
+use_biome_during_training: true
+hyperparameters:
+  rank_k: "num_biomes - 1"
+  skip_residualization: false
+  lr: 0.001
+  weight_decay: 0.0001
+  optimizer: "AdamW"
+  scheduler: "CosineAnnealingLR"

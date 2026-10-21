@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fairrsfm"
+version = "0.1.0"
+description = "Biome-Aware Benchmark & Debiasing Framework for Remote Sensing Foundation Models"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "FairRSFM Team" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: GIS",
+]
+dependencies = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "lightning>=2.0.0",
+    "timm>=0.9.0",
+    "numpy>=1.24.0,<2.3.0",
+    "scikit-learn>=1.2.0",
+    "scipy>=1.10.0",
+    "pandas>=2.0.0",
+    "pyyaml>=6.0",
+    "tqdm>=4.65.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

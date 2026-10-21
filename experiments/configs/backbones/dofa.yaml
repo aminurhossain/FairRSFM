@@ -1,0 +1,9 @@
+name: "dofa_vit_base"
+family: "DOFA"
+developer: "Wang et al."
+architecture: "ViT-Base with dynamic wavelength hypernetwork"
+parameters: 86_000_000
+patch_size: 16
+img_size: 224
+checkpoint_url: "https://github.com/zhu-xlab/DOFA"
+default_checkpoint: "checkpoints/dofa/DOFA_ViT_base_e100.pth"

@@ -1,0 +1,38 @@
+# FairRSFM Requirements
+# Core Deep Learning Framework
+torch>=2.0.0
+torchvision>=0.15.0
+lightning>=2.0.0
+torchmetrics>=1.0.0
+timm>=0.9.0
+transformers>=4.30.0
+
+# Geospatial & Remote Sensing
+terratorch>=0.1.0
+rasterio>=1.3.0
+pyproj>=3.4.0
+shapely>=2.0.0
+h5py>=3.8.0
+tifffile>=2023.1.0
+albumentations>=1.3.0
+
+# GEO-Bench (Benchmark API)
+# Can also be installed directly: pip install git+https://github.com/ServiceNow/geo-bench.git
+geobench>=0.1.0
+
+# Semantic Segmentation
+segmentation-models-pytorch>=0.3.3
+
+# Scientific & Evaluation Metrics
+numpy>=1.24.0,<2.3.0
+scipy>=1.10.0
+scikit-learn>=1.2.0
+pandas>=2.0.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Utilities & Logging
+tqdm>=4.65.0
+tensorboard>=2.12.0
+pyyaml>=6.0
+packaging>=21.0

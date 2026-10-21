@@ -1,0 +1,10 @@
+method: "ERM"
+full_name: "Empirical Risk Minimization"
+type: "unweighted_baseline"
+objective: "cross_entropy"
+use_biome_during_training: false
+hyperparameters:
+  lr: 0.001
+  weight_decay: 0.0001
+  optimizer: "AdamW"
+  scheduler: "CosineAnnealingLR"

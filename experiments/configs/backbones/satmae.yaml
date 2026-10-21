@@ -1,0 +1,15 @@
+name: "satmae_vit_base"
+family: "SatMAE"
+developer: "Stanford SustainLab"
+architecture: "ViT-Base"
+parameters: 86_000_000
+patch_size: 16
+img_size: 96
+multispectral: true
+in_chans: 10
+channel_groups:
+  - [0, 1, 2, 6]  # B2, B3, B4, B8
+  - [3, 4, 5, 7]  # B5, B6, B7, B8A
+  - [8, 9]        # B11, B12
+checkpoint_url: "https://github.com/sustainlab-group/SatMAE"
+default_checkpoint: "checkpoints/satmae/pretrain-vit-base-e199.pth"
