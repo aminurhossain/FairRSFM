@@ -43,6 +43,14 @@ wandb/
 slurm-*.out
 *.out
 
+# Internal smoke-test scripts & local check results
+BENCHMARK_RESULTS.md
+launch_benchmark_tmux.sh
+experiments/launch_benchmark_tmux.sh
+experiments/run_tmux_worker.sh
+experiments/run_48_benchmarks.py
+experiments/refresh_summary.py
+
 # Model weights and checkpoints (host on Hugging Face / Zenodo)
 /checkpoints/
 *.pt
