@@ -6,7 +6,7 @@ Key Features:
   • Task: Multi-label Classification (m-bigearthnet, 43 classes, BCEWithLogitsLoss)
   • Primary Metrics: Macro F1 Score, mAP (Mean Average Precision), Sample Accuracy
   • Fairness Suite: Worst/Best Macro F1, PER, Gini, ECE Disparity, Group Std, Equalized Odds, Demographic Parity
-  • Macro Grouping: Maps 14 biome codes to 6 macro biome groups via master_mapping.json
+  • Macro Grouping: Maps 14 biome codes to 6 macro biome groups via eurosat_biome_mapping.json
   • Slim Checkpoints: Strips frozen encoder weights (~2.5 MB per .ckpt file)
   • Live Test Logging: Evaluates test split at every validation epoch
   • Consolidated JSONs: Saves val_results.json and test_results.json
@@ -111,7 +111,7 @@ if not DATA_DIR.exists():
 
 BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/bigearthnet_biome_mapping.json"
 if not BIOME_JSON.exists():
-    BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/bigearthnet_master_mapping.json"
+    BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/bigearthnet_biome_mapping.json"
 
 WEIGHTS_PT = BASE_DIR / "checkpoints/Prithvi_EO_V2_300M_TL.pt"
 if not WEIGHTS_PT.exists():
@@ -833,7 +833,7 @@ def main():
     print(f"[Config] Dataset    : m-bigearthnet (43 classes, multi-label)")
     print(f"[Config] Mode       : Linear Probe")
     print(f"[Config] Seed       : {seed}")
-    print(f"[Config] Grouping   : Macro Grouping (master_mapping.json)")
+    print(f"[Config] Grouping   : Macro Grouping (eurosat_biome_mapping.json)")
     print(f"[Logging] Console log : {OUT_DIR / 'train.log'}")
     print(f"[Logging] JSON dir    : {OUT_DIR}")
 

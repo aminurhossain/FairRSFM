@@ -4,7 +4,7 @@ Prithvi EO V2 300M — BigEarthNet Multi-Label Classification (BOLP Method)
 ==========================================================================
 Key Features:
   • Task: Multi-label Classification (m-bigearthnet, 43 classes, BCEWithLogitsLoss)
-  • Method: Biome-Orthogonal Linear Probing (BOLP) with Macro Grouping (master_mapping.json)
+  • Method: Biome-Orthogonal Linear Probing (BOLP) with Macro Grouping (eurosat_biome_mapping.json)
   • Unknowns Purged: Dataset strictly filters out samples without known biome mappings.
   • Dynamic K: Projection rank automatically set to |B| - 1.
   • Ablation Ready: --skip-resid flag added for testing raw projections.
@@ -135,7 +135,7 @@ if not DATA_DIR.exists():
 
 BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/bigearthnet_biome_mapping.json"
 if not BIOME_JSON.exists():
-    BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/bigearthnet_master_mapping.json"
+    BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/bigearthnet_biome_mapping.json"
 
 WEIGHTS_PT = BASE_DIR / "checkpoints/Prithvi_EO_V2_300M_TL.pt"
 if not WEIGHTS_PT.exists():

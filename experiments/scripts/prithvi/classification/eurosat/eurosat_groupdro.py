@@ -6,7 +6,7 @@ Key Features:
   • Task: Single-label Multi-Class Classification (m-eurosat, 10 classes)
   • Method: Group Distributionally Robust Optimization (Group DRO - Sagawa et al., ICLR 2020)
   • Dynamic Group Weights: q_g <- q_g * exp(eta_q * loss_g) normalized over the probability simplex.
-  • Biome Macro Groups: Strictly evaluated across all macro biome groups from master_mapping.json.
+  • Biome Macro Groups: Strictly evaluated across all macro biome groups from eurosat_biome_mapping.json.
   • Unknowns Purged: Dataset strictly filters out samples without known biome mappings.
   • Metrics Suite: Full overall & per-biome Macro F1, mAP, Accuracy, ECE, PER, Gini, NFR, EqOdds, DPM.
   • JSON Outputs: Saves val_results.json and test_results.json at every epoch.
@@ -115,7 +115,7 @@ if not DATA_DIR.exists():
 
 BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/eurosat_biome_mapping.json"
 if not BIOME_JSON.exists():
-    BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/master_mapping.json"
+    BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/eurosat_biome_mapping.json"
 
 WEIGHTS_PT = BASE_DIR / "checkpoints/Prithvi_EO_V2_300M_TL.pt"
 if not WEIGHTS_PT.exists():

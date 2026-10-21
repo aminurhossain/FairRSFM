@@ -5,7 +5,7 @@ DOFA ViT-Base 16 — BigEarthNet Multi-Label Classification (BOLP Method)
 Key Features:
   • Task: Multi-label Classification (m-bigearthnet, 43 classes, BCEWithLogitsLoss)
   • Architecture: DOFA ViT-Base 16 (224x224) with official 12-Band DOFA Spectral Conditioning
-  • Method: Biome-Orthogonal Linear Probing (BOLP) with Macro Grouping (bigearthnet_master_mapping.json)
+  • Method: Biome-Orthogonal Linear Probing (BOLP) with Macro Grouping (bigearthnet_biome_mapping.json)
   • Probe Head: BatchNorm1d(768, affine=False) + Linear(768, 43) matching ERM
   • Subspace Projector: P_k = I - U_k U_k^T where k = |B| - 1
   • Wavelengths (µm): [0.443, 0.490, 0.560, 0.665, 0.705, 0.740, 0.783, 0.842, 0.865, 0.945, 1.610, 2.190]
@@ -104,7 +104,7 @@ if not DATA_DIR.exists() and os.environ.get("GEO_BENCH_DIR"):
 if not DATA_DIR.exists():
     DATA_DIR = Path("/data1/aminur/dataset/geobench")
 
-BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/bigearthnet_master_mapping.json"
+BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/bigearthnet_biome_mapping.json"
 WEIGHTS_PT = BASE_DIR / "checkpoints/dofa/dofa_base_patch16_224.pth"
 
 BENCHMARK_NAME = "classification_v1.0"
@@ -884,7 +884,7 @@ def main():
     print(f"[Config] Method       : BOLP (Biome-Orthogonal Linear Probing)")
     print(f"[Config] Base LR / LR : blr={args.blr} / lr={lr}")
     print(f"[Config] Seed         : {seed}")
-    print(f"[Config] Grouping     : Macro Grouping (bigearthnet_master_mapping.json)")
+    print(f"[Config] Grouping     : Macro Grouping (bigearthnet_biome_mapping.json)")
     print(f"[Logging] Console log : {OUT_DIR / 'train.log'}")
     print(f"[Logging] JSON dir    : {OUT_DIR}")
 

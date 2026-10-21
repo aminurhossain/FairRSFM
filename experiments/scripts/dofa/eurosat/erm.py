@@ -10,7 +10,7 @@ Key Features:
   • Normalization: Exact GeoBench Task Statistics ([959.18, 1057.28, 1123.14, 1227.44, 2076.63, 2463.43, 2390.32, 1138.94, 2699.78])
   • Augmentation: RandomResizedCrop(224, scale=(0.8, 1.0)) + RandomHorizontalFlip(0.5)
   • Optimizer: LARS (Layer-wise Adaptive Rate Scaling, LR=2.5, Base LR=10.0)
-  • Grouping: Macro Grouping (master_mapping.json)
+  • Grouping: Macro Grouping (eurosat_biome_mapping.json)
   • Subgroup Unique-Class Macro F1: Exact evaluation matching eval_all_models.py (labels=present)
   • Metrics Suite: Macro/Micro F1, mAP, Accuracy, ECE, Worst/Best F1, PER, Gini, NFR,
                    ECE Disparity, Equalized Odds Disparity, Demographic Parity Difference,
@@ -104,7 +104,7 @@ if not DATA_DIR.exists() and os.environ.get("GEO_BENCH_DIR"):
 if not DATA_DIR.exists():
     DATA_DIR = Path("/data1/aminur/dataset/geobench")
 
-BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/master_mapping.json"
+BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/eurosat_biome_mapping.json"
 WEIGHTS_PT = BASE_DIR / "checkpoints/dofa/dofa_base_patch16_224.pth"
 
 BENCHMARK_NAME = "classification_v1.0"
@@ -741,7 +741,7 @@ def main():
     print(f"[Config] Mode         : Linear Probe (ERM with LARS)")
     print(f"[Config] Base LR / LR : blr={args.blr} / lr={lr}")
     print(f"[Config] Seed         : {seed}")
-    print(f"[Config] Grouping     : Macro Grouping (master_mapping.json)")
+    print(f"[Config] Grouping     : Macro Grouping (eurosat_biome_mapping.json)")
     print(f"[Logging] Console log : {OUT_DIR / 'train.log'}")
     print(f"[Logging] JSON dir    : {OUT_DIR}")
 

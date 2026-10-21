@@ -15,7 +15,7 @@ Key Features:
   • Normalization: Official SatMAE Sentinel-2 min-max reflectance normalization ([0.0, 1.0])
   • Probe Head: BatchNorm1d(embed_dim, affine=False) + Linear(embed_dim, num_classes)
   • Fairness Suite: Worst/Best Macro F1, PER, Gini, ECE Disparity, Group Std, Equalized Odds, Demographic Parity
-  • Macro Grouping: Maps 14 biome codes to 6 macro biome groups via master_mapping.json
+  • Macro Grouping: Maps 14 biome codes to 6 macro biome groups via eurosat_biome_mapping.json
   • Slim Checkpoints: Strips frozen encoder weights (~150 KB per .ckpt file)
   • Live Test Logging: Evaluates test split at every validation epoch
   • Consolidated JSONs: Saves cumulative epoch history to val_results.json and test_results.json under SATMAE/runs/
@@ -119,9 +119,9 @@ if not DATA_DIR.exists() and os.environ.get("GEO_BENCH_DIR"):
 if not DATA_DIR.exists():
     DATA_DIR = Path("/data1/aminur/dataset/geobench")
 
-BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/data_mappings/master_mapping.json"
+BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/eurosat_biome_mapping.json"
 if not BIOME_JSON.exists():
-    BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/master_mapping.json"
+    BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/eurosat_biome_mapping.json"
 if not BIOME_JSON.exists():
     BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/eurosat_biome_mapping.json"
 

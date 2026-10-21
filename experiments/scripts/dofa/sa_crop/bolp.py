@@ -5,14 +5,14 @@ DOFA ViT-Base 16 — SA-Crop-Type Semantic Segmentation (BOLP Method)
 Key Features:
   • Task: Semantic Segmentation (m-SA-crop-type, 10 classes, CrossEntropyLoss)
   • Architecture: DOFA ViT-Base 16 (224x224) with official 12-Band DOFA Spectral Conditioning
-  • Method: Biome-Orthogonal Linear Probing (BOLP) with Biome Subspace Removal (sa_crop_mapping.json)
+  • Method: Biome-Orthogonal Linear Probing (BOLP) with Biome Subspace Removal (sa_crop_biome_mapping.json)
   • Probe Head: BatchNorm2d(768, affine=False) + Conv2d(768, 10, kernel_size=1) + Bilinear Interpolation
   • Subspace Projector: P_k = I - U_k U_k^T where k = |B| - 1
   • Wavelengths (µm): [0.443, 0.490, 0.560, 0.665, 0.705, 0.740, 0.783, 0.842, 0.865, 0.945, 1.610, 2.190]
   • Normalization: Exact GeoBench Task Statistics (12 Sentinel-2 Bands)
   • Augmentation: RandomHorizontalFlip(0.5) + RandomVerticalFlip(0.5) + Resize(224, 224)
   • Optimizer: LARS (Layer-wise Adaptive Rate Scaling, LR=1.0, Base LR=1.0)
-  • Grouping: Biome Grouping (sa_crop_mapping.json)
+  • Grouping: Biome Grouping (sa_crop_biome_mapping.json)
   • Subgroup Unique-Class Evaluation: mIoU, Macro F1, Pixel Accuracy, and ECE per biome
   • Metrics Suite: Global & Per-biome mIoU, Worst/Best mIoU, PER, Gini, NFR, EqOdds, DPM, Per-Class IoU Table.
   • Slim Checkpoints: Strips frozen encoder weights (~120 KB per .ckpt file).
@@ -101,11 +101,11 @@ DATA_DIR = Path(os.environ.get("GEO_BENCH_DIR", BASE_DIR / "data/geobench"))
 if not DATA_DIR.exists():
     DATA_DIR = Path("/data1/aminur/dataset/geobench")
 
-BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/sa_crop_mapping.json"
+BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/sa_crop_biome_mapping.json"
 if not BIOME_JSON.exists():
     BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/sa_crop_biome_mapping.json"
 if not BIOME_JSON.exists():
-    BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/sa_crop_mapping.json"
+    BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/sa_crop_biome_mapping.json"
 
 WEIGHTS_PT = BASE_DIR / "checkpoints/dofa/dofa_base_patch16_224.pth"
 if not WEIGHTS_PT.exists():
@@ -890,7 +890,7 @@ def main():
     print(f"[Config] Mode         : Semantic Segmentation BOLP (Biome-Orthogonal Linear Probing)")
     print(f"[Config] Base LR / LR : blr={args.blr} / lr={lr}")
     print(f"[Config] Seed         : {seed}")
-    print(f"[Config] Grouping     : Biome Grouping (sa_crop_mapping.json)")
+    print(f"[Config] Grouping     : Biome Grouping (sa_crop_biome_mapping.json)")
     print(f"[Logging] Console log : {OUT_DIR / 'train.log'}")
     print(f"[Logging] JSON dir    : {OUT_DIR}")
 

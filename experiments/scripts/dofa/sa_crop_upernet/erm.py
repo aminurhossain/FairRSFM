@@ -6,7 +6,7 @@ Key Features:
   • Task: Semantic Segmentation (m-SA-crop-type, 10 classes, CrossEntropyLoss)
   • Architecture: DOFA ViT-Base 16 + Multi-Level UPerNet Decoder (layers [2, 5, 8, 11] + PPM + FPN)
   • Method: Empirical Risk Minimization (ERM) with Frozen Backbone
-  • Biome Grouping: Evaluated across macro biomes from sa_crop_mapping.json.
+  • Biome Grouping: Evaluated across macro biomes from sa_crop_biome_mapping.json.
   • Subgroup Unique-Class Evaluation: mIoU, Macro F1, Pixel Accuracy, and ECE per biome.
   • Metrics Suite: Global & Per-biome mIoU, Worst/Best mIoU, PER, Gini, NFR, EqOdds, DPM, Per-Class IoU Table.
   • JSON Outputs: Saves val_results.json and test_results.json at every epoch.
@@ -94,7 +94,7 @@ if not DATA_DIR.exists() and os.environ.get("GEO_BENCH_DIR"):
 if not DATA_DIR.exists():
     DATA_DIR = Path("/data1/aminur/dataset/geobench")
 
-BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/sa_crop_mapping.json"
+BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/sa_crop_biome_mapping.json"
 WEIGHTS_PT = BASE_DIR / "checkpoints/dofa/dofa_base_patch16_224.pth"
 
 BENCHMARK_NAME = "segmentation_v1.0"
@@ -765,7 +765,7 @@ def main():
     print(f"[Config] Mode         : Empirical Risk Minimization (ERM)")
     print(f"[Config] LR           : {args.lr}")
     print(f"[Config] Seed         : {seed}")
-    print(f"[Config] Grouping     : Biome Grouping (sa_crop_mapping.json)")
+    print(f"[Config] Grouping     : Biome Grouping (sa_crop_biome_mapping.json)")
     print(f"[Logging] Console log : {OUT_DIR / 'train.log'}")
     print(f"[Logging] JSON dir    : {OUT_DIR}")
 

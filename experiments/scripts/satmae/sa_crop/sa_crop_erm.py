@@ -114,11 +114,11 @@ if not DATA_DIR.exists() and os.environ.get("GEO_BENCH_DIR"):
     DATA_DIR = Path(os.environ["GEO_BENCH_DIR"])
 if not DATA_DIR.exists():
     DATA_DIR = Path("/data1/aminur/dataset/geobench")
-BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/data_mappings/sa_crop_mapping.json"
+BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/sa_crop_biome_mapping.json"
 if not BIOME_JSON.exists():
-    BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/sa_crop_mapping.json"
+    BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/sa_crop_biome_mapping.json"
 if not BIOME_JSON.exists():
-    BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/sa_crop_mapping.json"
+    BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/sa_crop_biome_mapping.json"
 
 DEFAULT_CKPT_BASE  = BASE_DIR / "checkpoints/satmae/pretrain-vit-base-e199.pth"
 if not DEFAULT_CKPT_BASE.exists():

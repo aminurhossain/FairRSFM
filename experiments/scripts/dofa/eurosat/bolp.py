@@ -5,7 +5,7 @@ DOFA ViT-Base 16 — EuroSAT Classification (BOLP Method)
 Key Features:
   • Task: Single-label Multi-Class Classification (m-eurosat, 10 classes)
   • Architecture: DOFA ViT-Base 16 (224x224) with official 9-Band DOFA Spectral Conditioning
-  • Method: Biome-Orthogonal Linear Probing (BOLP) with Macro Grouping (master_mapping.json)
+  • Method: Biome-Orthogonal Linear Probing (BOLP) with Macro Grouping (eurosat_biome_mapping.json)
   • Probe Head: BatchNorm1d(768, affine=False) + Linear(768, 10) matching ERM exactly
   • Subspace Projector: P_k = I - U_k U_k^T where k = |B| - 1
   • Wavelengths (µm): [0.66, 0.56, 0.49, 0.70, 0.74, 0.78, 0.84, 1.61, 2.20]
@@ -103,7 +103,7 @@ if not DATA_DIR.exists() and os.environ.get("GEO_BENCH_DIR"):
 if not DATA_DIR.exists():
     DATA_DIR = Path("/data1/aminur/dataset/geobench")
 
-BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/master_mapping.json"
+BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/eurosat_biome_mapping.json"
 WEIGHTS_PT = BASE_DIR / "checkpoints/dofa/dofa_base_patch16_224.pth"
 
 BENCHMARK_NAME = "classification_v1.0"
@@ -842,7 +842,7 @@ def main():
     print(f"[Config] Method       : BOLP (Biome-Orthogonal Linear Probing)")
     print(f"[Config] Base LR / LR : blr={args.blr} / lr={lr}")
     print(f"[Config] Seed         : {seed}")
-    print(f"[Config] Grouping     : Macro Grouping (master_mapping.json)")
+    print(f"[Config] Grouping     : Macro Grouping (eurosat_biome_mapping.json)")
     print(f"[Logging] Console log : {OUT_DIR / 'train.log'}")
     print(f"[Logging] JSON dir    : {OUT_DIR}")
 

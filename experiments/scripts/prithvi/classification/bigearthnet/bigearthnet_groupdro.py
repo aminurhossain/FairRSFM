@@ -7,7 +7,7 @@ Key Features:
   • Architecture: Prithvi-EO-V2-300M (Terratorch PrithviModelFactory + MLPDecoder)
   • Method: Group Distributionally Robust Optimization (Group DRO - Sagawa et al., ICLR 2020)
   • Dynamic Group Weights: q_g <- q_g * exp(eta_q * loss_g) normalized over the probability simplex.
-  • Biome Macro Groups: Evaluated across macro biome groups from bigearthnet_master_mapping.json.
+  • Biome Macro Groups: Evaluated across macro biome groups from bigearthnet_biome_mapping.json.
   • Unknowns Purged: Dataset strictly filters out samples without known biome mappings.
   • Subgroup Unique-Class Evaluation: Macro F1 computed over classes present in each biome.
   • Optimal Validation Threshold Sweep: Grid search t in [0.05, 0.95] for calibrated multi-label F1.
@@ -126,7 +126,7 @@ if not DATA_DIR.exists():
 
 BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/bigearthnet_biome_mapping.json"
 if not BIOME_JSON.exists():
-    BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/bigearthnet_master_mapping.json"
+    BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/bigearthnet_biome_mapping.json"
 
 WEIGHTS_PT = BASE_DIR / "checkpoints/Prithvi_EO_V2_300M_TL.pt"
 if not WEIGHTS_PT.exists():
@@ -877,7 +877,7 @@ def main():
     print(f"[Config] LR           : {args.lr}")
     print(f"[Config] Eta Q        : {args.eta_q}")
     print(f"[Config] Seed         : {seed}")
-    print(f"[Config] Grouping     : Macro Grouping (bigearthnet_master_mapping.json)")
+    print(f"[Config] Grouping     : Macro Grouping (bigearthnet_biome_mapping.json)")
     print(f"[Logging] Console log : {OUT_DIR / 'train.log'}")
     print(f"[Logging] JSON dir    : {OUT_DIR}")
 

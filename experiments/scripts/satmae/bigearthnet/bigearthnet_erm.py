@@ -14,7 +14,7 @@ Key Features:
   • Probe Head: BatchNorm1d(embed_dim, affine=False) + Linear(embed_dim, 43)
   • Fairness Suite: Overall mAP & Macro F1 (optimal & 0.5 thresholding), Worst/Best Subgroup F1/mAP,
                    PER, Gini, NFR, ECE Disparity, Equalized Odds, Demographic Parity, per-class F1 table
-  • Macro Grouping: Maps biome codes to macro biome groups via bigearthnet_master_mapping.json
+  • Macro Grouping: Maps biome codes to macro biome groups via bigearthnet_biome_mapping.json
   • Slim Checkpoints: Strips frozen encoder weights (~150 KB per .ckpt file)
   • Live Test Logging: Evaluates test split at every validation epoch
   • Consolidated JSONs: Saves cumulative epoch history to val_results.json and test_results.json under SATMAE/runs/
@@ -116,9 +116,9 @@ if not DATA_DIR.exists() and os.environ.get("GEO_BENCH_DIR"):
     DATA_DIR = Path(os.environ["GEO_BENCH_DIR"])
 if not DATA_DIR.exists():
     DATA_DIR = Path("/data1/aminur/dataset/geobench")
-BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/data_mappings/bigearthnet_master_mapping.json"
+BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/bigearthnet_biome_mapping.json"
 if not BIOME_JSON.exists():
-    BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/bigearthnet_master_mapping.json"
+    BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/bigearthnet_biome_mapping.json"
 if not BIOME_JSON.exists():
     BIOME_JSON = BASE_DIR / "experiments/configs/data_mappings/bigearthnet_biome_mapping.json"
 
