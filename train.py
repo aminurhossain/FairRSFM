@@ -125,6 +125,7 @@ def main():
     parser.add_argument("--data_dir", "--data-dir", type=str, default=None, dest="data_dir", help="Dataset directory path")
     parser.add_argument("--output_dir", "--out_dir", "--out-dir", type=str, default=None, dest="output_dir", help="Output directory")
     parser.add_argument("--gpu", "--device", type=str, default=None, dest="gpu", help="GPU device ID (e.g. 0)")
+    parser.add_argument("--train_samples", "--train-samples", type=int, default=None, dest="train_samples", help="Limit number of training samples for smoke/mock test")
 
     args, unknown_args = parser.parse_known_args()
 
@@ -211,6 +212,13 @@ def main():
     # GPU
     if args.gpu is not None and "--gpu" in help_text:
         cmd.extend(["--gpu", str(args.gpu)])
+
+    # Train samples (mock / smoke testing)
+    if args.train_samples is not None:
+        if "--train-samples" in help_text:
+            cmd.extend(["--train-samples", str(args.train_samples)])
+        elif "--train_samples" in help_text:
+            cmd.extend(["--train_samples", str(args.train_samples)])
 
     # Pass any extra unknown arguments directly
     if unknown_args:

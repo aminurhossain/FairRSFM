@@ -50,6 +50,7 @@ experiments/launch_benchmark_tmux.sh
 experiments/run_tmux_worker.sh
 experiments/run_48_benchmarks.py
 experiments/refresh_summary.py
+launch_retry_failed_tmux.sh
 
 # Model weights and checkpoints (host on Hugging Face / Zenodo)
 /checkpoints/

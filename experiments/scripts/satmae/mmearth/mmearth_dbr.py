@@ -746,7 +746,7 @@ class BiomeSegmentationLogger(Callback):
         worst_miou = min(miou_vals) if miou_vals else float("nan")
         best_miou  = max(miou_vals) if miou_vals else float("nan")
         mean_miou  = float(np.mean(miou_vals)) if miou_vals else float("nan")
-        miou_std   = float(np.std(miou_vals)) if miou_vals else 0.0
+        miou_std   = float((np.std(miou_vals, ddof=1) if len(miou_vals) > 1 else 0.0)) if miou_vals else 0.0
         per        = (worst_miou / best_miou) if (best_miou > 0 and not np.isnan(worst_miou)) else 0.0
         nfr        = (best_miou - worst_miou) / global_miou if global_miou > 0 else float("nan")
         gini       = compute_gini(miou_vals)
@@ -867,6 +867,7 @@ def main():
     parser.add_argument("--model-size", type=str, default="base", choices=["base", "large"], help="SatMAE model size (default: large)")
     parser.add_argument("--ckpt-path", type=str, default=None, help="Custom path to pretrained SatMAE weights (.pth)")
     parser.add_argument("--out-dir", type=str, default=None, help="Custom output directory")
+    parser.add_argument("--train-samples", "--train_samples", type=int, default=None, help="Limit number of training samples for smoke test")
     args = parser.parse_args()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
@@ -913,6 +914,7 @@ def main():
         fallback_val_fraction  = 0.1,
         fallback_test_fraction = 0.1,
         seed                   = seed,
+        train_samples          = args.train_samples,
     )
     datamodule.setup("fit")
     datamodule.setup("test")

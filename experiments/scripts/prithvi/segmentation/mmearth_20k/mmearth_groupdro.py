@@ -131,10 +131,23 @@ class CleanProgressBar(TQDMProgressBar):
 # ─────────────────────────────────────────────────────────────────────────────
 
 BASE_DIR  = ROOT_DIR
-DATA_ROOT = MMEARTH_DIR / "hardcoded"
+_data_cands = [
+    Path(os.environ.get("MMEARTH_DATA_DIR", "")),
+    Path("/data1/aminur/om/MMearth20k/hardcoded"),
+    BASE_DIR / "methods/prithvi/segmentation/mmearth_20k/hardcoded",
+    BASE_DIR / "data/mmearth",
+]
+DATA_ROOT = Path("/data1/aminur/om/MMearth20k/hardcoded")
+for _dc in _data_cands:
+    if _dc.is_dir():
+        DATA_ROOT = _dc
+        break
+
 WEIGHTS_PT = BASE_DIR / "checkpoints/Prithvi_EO_V2_300M_TL.pt"
 if not WEIGHTS_PT.exists():
     WEIGHTS_PT = BASE_DIR / "models/Prithvi_EO_V2_300M_TL.pt"
+if not WEIGHTS_PT.exists():
+    WEIGHTS_PT = Path("/data1/aminur/om/prithvi/FairRSFM_unified/checkpoints/Prithvi_EO_V2_300M_TL.pt")
 
 NUM_CLASSES  = len(DYNAMIC_WORLD_CLASSES)  # 9
 IGNORE_INDEX = -1
@@ -143,7 +156,7 @@ CLASS_NAMES  = DYNAMIC_WORLD_CLASSES
 PRITHVI_BANDS = ["BLUE", "GREEN", "RED", "NIR_NARROW", "SWIR_1", "SWIR_2"]
 MMEARTH_S2_BANDS = ["B2", "B3", "B4", "B8A", "B11", "B12"]
 
-BATCH_SIZE   = 256
+BATCH_SIZE   = 32
 EPOCHS = 50
 LR           = 1e-3
 WEIGHT_DECAY = 0.01
@@ -582,7 +595,7 @@ class BiomeSegmentationLogger(Callback):
             worst_miou = float(np.min(valid_mious))
             best_miou  = float(np.max(valid_mious))
             mean_miou  = float(np.mean(valid_mious))
-            std_miou   = float(np.std(valid_mious))
+            std_miou   = float((np.std(valid_mious, ddof=1) if len(valid_mious) > 1 else 0.0))
             per_ratio  = float(worst_miou / best_miou) if best_miou > 0 else float("nan")
             gini_coef  = compute_gini(valid_mious)
             nfr        = float((best_miou - worst_miou) / mean_miou) if mean_miou > 0 else float("nan")
@@ -779,6 +792,8 @@ def main():
     parser.add_argument("--eta-q", type=float, default=0.01, help="Group DRO step size for group weights q (default: 0.01)")
     parser.add_argument("--epochs", type=int, default=EPOCHS, help="Number of training epochs")
     parser.add_argument("--resume-from", type=str, default=None, help="Path to checkpoint to resume training from")
+    parser.add_argument("--out-dir", "--out_dir", type=str, default=None, help="Output directory")
+    parser.add_argument("--train-samples", "--train_samples", type=int, default=None, help="Number of training samples")
     args = parser.parse_args()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
@@ -786,7 +801,10 @@ def main():
     L.seed_everything(seed)
 
     mode_str = "mmearth_groupdro_final"
-    OUT_DIR  = BASE_DIR / f"runs_mmearth/mmearth20k/seed_{seed}/groupdro"
+    if args.out_dir:
+        OUT_DIR = Path(args.out_dir)
+    else:
+        OUT_DIR = BASE_DIR / f"runs_mmearth/mmearth20k/seed_{seed}/groupdro"
     CKPT_DIR = OUT_DIR  / "checkpoints"
 
     for p in [DATA_ROOT, WEIGHTS_PT]:
@@ -819,6 +837,7 @@ def main():
         fallback_val_fraction  = 0.1,
         fallback_test_fraction = 0.1,
         seed                   = seed,
+        train_samples          = args.train_samples,
     )
     datamodule.setup("fit")
     datamodule.setup("test")
@@ -864,6 +883,7 @@ def main():
         plot_on_val       = False,
         class_names       = DYNAMIC_WORLD_CLASSES,
     )
+    gdro_task.strict_loading = False
 
     CKPT_MACRO_DIR = CKPT_DIR / "best_miou"
     CKPT_WORST_DIR = CKPT_DIR / "best_worst_miou"
@@ -937,6 +957,34 @@ def main():
         print(f"[Done] Best Worst mIoU Checkpoint : {ckpt_worst_cb.best_model_path}")
         print(f"[Done] Best Worst mIoU Score      : {ckpt_worst_cb.best_model_score:.4f}")
 
+    def strip_encoder_from_checkpoint(ckpt_path: Path | str | None) -> None:
+        if not ckpt_path:
+            return
+        ckpt_path = Path(ckpt_path)
+        if not ckpt_path.exists():
+            return
+        try:
+            checkpoint = torch.load(ckpt_path, map_location="cpu")
+            if "state_dict" in checkpoint:
+                keys = list(checkpoint["state_dict"].keys())
+                stripped = False
+                for k in keys:
+                    if k.startswith("model.encoder.") or k.startswith("model.backbone."):
+                        del checkpoint["state_dict"][k]
+                        stripped = True
+                if stripped:
+                    torch.save(checkpoint, ckpt_path)
+        except Exception as e:
+            print(f"[Warning] strip_encoder_from_checkpoint failed: {e}")
+
+    if ckpt_macro_cb.best_model_path:
+        strip_encoder_from_checkpoint(ckpt_macro_cb.best_model_path)
+    if ckpt_macro_cb.last_model_path and ckpt_macro_cb.last_model_path != ckpt_macro_cb.best_model_path:
+        strip_encoder_from_checkpoint(ckpt_macro_cb.last_model_path)
+    if ckpt_worst_cb.best_model_path:
+        strip_encoder_from_checkpoint(ckpt_worst_cb.best_model_path)
+
 
 if __name__ == "__main__":
     main()
+

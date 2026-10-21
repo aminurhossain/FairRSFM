@@ -375,7 +375,7 @@ def compute_segmentation_metrics_from_biome_data(biome_data: dict,
     if len(valid_mious) >= 2:
         worst_miou = float(np.min(valid_mious))
         mean_miou = float(np.mean(valid_mious))
-        std_miou = float(np.std(valid_mious))
+        std_miou = float((np.std(valid_mious, ddof=1) if len(valid_mious) > 1 else 0.0))
         nfr_miou = (max(valid_mious) - min(valid_mious)) / mean_miou if mean_miou > 0 else float("nan")
         dev = sum(abs(v - global_miou) for v in valid_mious)
         es_miou = float(global_miou / (dev + 1))
@@ -386,7 +386,7 @@ def compute_segmentation_metrics_from_biome_data(biome_data: dict,
     if len(valid_f1s) >= 2:
         worst_f1 = float(np.min(valid_f1s))
         mean_f1 = float(np.mean(valid_f1s))
-        std_f1 = float(np.std(valid_f1s))
+        std_f1 = float((np.std(valid_f1s, ddof=1) if len(valid_f1s) > 1 else 0.0))
         nfr_f1 = (max(valid_f1s) - min(valid_f1s)) / mean_f1 if mean_f1 > 0 else float("nan")
     else:
         worst_f1 = mean_f1 = std_f1 = nfr_f1 = float("nan")
@@ -701,7 +701,7 @@ class BiomeMacroF1Logger(Callback):
         if len(valid) >= 2:
             print(f"\n  Fairness Metrics [F1]:")
             print(f"  Worst-case F1 : {np.min(valid):.4f}")
-            print(f"  Std F1        : {np.std(valid):.4f}")
+            print(f"  Std F1        : {(np.std(valid, ddof=1) if len(valid) > 1 else 0.0):.4f}")
             print(f"  PER F1        : {np.min(valid)/np.max(valid):.4f}")
         print(f"  {'─'*54}")
 
@@ -801,7 +801,7 @@ class BiomeMIoULogger(Callback):
             worst_miou = float(np.min(valid_ious))
             best_miou  = float(np.max(valid_ious))
             mean_miou  = float(np.mean(valid_ious))
-            std_miou   = float(np.std(valid_ious))
+            std_miou   = float((np.std(valid_ious, ddof=1) if len(valid_ious) > 1 else 0.0))
             per_ratio  = float(worst_miou / best_miou) if best_miou > 0 else None
             gini_coef  = compute_gini(valid_ious)
             nfr        = float((best_miou - worst_miou) / np.mean(valid_ious)) if np.mean(valid_ious) > 0 else float("nan")
@@ -1291,7 +1291,7 @@ def evaluate_test_split(lp_model, test_loader, biome_map, device):
     if len(valid_mious) >= 2:
         worst_miou = float(np.min(valid_mious))
         mean_miou  = float(np.mean(valid_mious))
-        std_miou   = float(np.std(valid_mious))
+        std_miou   = float((np.std(valid_mious, ddof=1) if len(valid_mious) > 1 else 0.0))
         nfr_miou   = (max(valid_mious) - min(valid_mious)) / mean_miou if mean_miou > 0 else float("nan")
 
         # Equity scaled miou

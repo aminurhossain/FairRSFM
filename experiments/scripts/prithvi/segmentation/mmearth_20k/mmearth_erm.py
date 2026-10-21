@@ -101,15 +101,6 @@ class CleanProgressBar(TQDMProgressBar):
 
         return items
     
-def strip_encoder_from_checkpoint(ckpt_path: Path):
-    if not ckpt_path.exists(): return
-    checkpoint = torch.load(ckpt_path, map_location="cpu")
-    if "state_dict" in checkpoint:
-        keys = list(checkpoint["state_dict"].keys())
-        for k in keys:
-            if k.startswith("model.encoder.") or k.startswith("model.backbone."):
-                del checkpoint["state_dict"][k]
-        torch.save(checkpoint, ckpt_path)
 
 import argparse
 import csv
@@ -148,7 +139,17 @@ USE_BOLP      = False   # Biome-Orthogonal Linear Probing
 
 # ── Paths ──
 SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_DATA_ROOT = os.environ.get("MMEARTH_DATA_DIR", "/data1/aminur/om/MMearth20k/hardcoded")
+_data_cands = [
+    Path(os.environ.get("MMEARTH_DATA_DIR", "")),
+    Path("/data1/aminur/om/MMearth20k/hardcoded"),
+    SCRIPT_DIR.parents[4] / "methods/prithvi/segmentation/mmearth_20k/hardcoded",
+    SCRIPT_DIR.parents[4] / "data/mmearth",
+]
+DEFAULT_DATA_ROOT = "/data1/aminur/om/MMearth20k/hardcoded"
+for _dc in _data_cands:
+    if _dc.is_dir():
+        DEFAULT_DATA_ROOT = str(_dc)
+        break
 DEFAULT_OUT_DIR = str(Path(__file__).resolve().parent / "output")
 
 # ── Bands ──
@@ -156,7 +157,7 @@ PRITHVI_BANDS   = ["BLUE", "GREEN", "RED", "NIR_NARROW", "SWIR_1", "SWIR_2"]
 MMEARTH_S2_BANDS = ["B2", "B3", "B4", "B8A", "B11", "B12"]
 
 # ── Hyperparams ──
-BATCH_SIZE   = 122
+BATCH_SIZE   = 32
 EPOCHS = 50
 LR           = 1.0e-3
 WEIGHT_DECAY = 0.01
@@ -413,7 +414,7 @@ def compute_fairness_metrics(
         }
     worst = float(np.min(valid))
     mean  = float(np.mean(valid))
-    std   = float(np.std(valid))
+    std   = float((np.std(valid, ddof=1) if len(valid) > 1 else 0.0))
     nfr   = (max(valid) - min(valid)) / mean if mean > 0 else float("nan")
     return {
         "worst_biome_miou": worst,
@@ -1152,10 +1153,24 @@ def build_model(
 
     decoder_type = decoder.lower()
 
+    _ckpt_cands = [
+        SCRIPT_DIR.parents[4] / "checkpoints/Prithvi_EO_V2_300M_TL.pt",
+        SCRIPT_DIR.parents[4] / "models/Prithvi_EO_V2_300M_TL.pt",
+        Path("/data1/aminur/om/prithvi/FairRSFM_unified/checkpoints/Prithvi_EO_V2_300M_TL.pt"),
+        Path("/data1/aminur/om/prithvi/FairRSFM/checkpoints/Prithvi_EO_V2_300M_TL.pt"),
+    ]
+    _ckpt_path = None
+    for _c in _ckpt_cands:
+        if _c.exists():
+            _ckpt_path = str(_c)
+            break
+    if _ckpt_path is None:
+        _ckpt_path = str(SCRIPT_DIR.parents[4] / "checkpoints/Prithvi_EO_V2_300M_TL.pt")
+
     base_args = {
         "backbone":            "prithvi_eo_v2_300_tl",
         "backbone_pretrained": True,
-        "backbone_ckpt_path":  str(SCRIPT_DIR.parents[3] / "models/Prithvi_EO_V2_300M_TL.pt"),
+        "backbone_ckpt_path":  _ckpt_path,
         "backbone_bands":      PRITHVI_BANDS,
         "backbone_num_frames": 1,
         "num_classes":         num_classes,
@@ -1253,6 +1268,7 @@ def build_datamodule(args: argparse.Namespace) -> MMEarthDynamicWorldSegmentatio
         fallback_val_fraction  = args.val_fraction,
         fallback_test_fraction = args.test_fraction,
         seed            = args.seed,
+        train_samples   = args.train_samples,
     )
 
 
@@ -1380,9 +1396,33 @@ def load_checkpoint_weights(
     checkpoint_path: str | Path,
     device:          torch.device,
 ) -> None:
-    checkpoint = torch.load(checkpoint_path, map_location="gpu")
-    model.load_state_dict(checkpoint["state_dict"])
+    if not checkpoint_path:
+        return
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    state_dict = checkpoint.get("state_dict", checkpoint)
+    model.load_state_dict(state_dict, strict=False)
     model.to(device)
+
+
+def strip_encoder_from_checkpoint(ckpt_path: Path | str | None) -> None:
+    if not ckpt_path:
+        return
+    ckpt_path = Path(ckpt_path)
+    if not ckpt_path.exists():
+        return
+    try:
+        checkpoint = torch.load(ckpt_path, map_location="cpu")
+        if "state_dict" in checkpoint:
+            keys = list(checkpoint["state_dict"].keys())
+            stripped = False
+            for k in keys:
+                if k.startswith("model.encoder.") or k.startswith("model.backbone."):
+                    del checkpoint["state_dict"][k]
+                    stripped = True
+            if stripped:
+                torch.save(checkpoint, ckpt_path)
+    except Exception as e:
+        print(f"[Warning] strip_encoder_from_checkpoint failed: {e}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1444,6 +1484,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--tensorboard",          action="store_true")
     p.add_argument("--test-only",            action="store_true")
     p.add_argument("--ckpt-path",            default=None)
+    p.add_argument("--train-samples",        type=int,   default=None, help="Limit number of training samples for smoke test")
     # DBR overrides
     p.add_argument("--dbr-alpha",   type=float, default=DBR_ALPHA)
     p.add_argument("--dbr-ema",     type=float, default=DBR_EMA)
@@ -1549,6 +1590,7 @@ def main() -> None:
         tile_info    = tile_info,
         bolp_module  = bolp_module,
     )
+    model.strict_loading = False
 
     # ── BOLP Phase A: fit projection matrix ──
     if USE_BOLP:
@@ -1655,9 +1697,6 @@ def main() -> None:
         trainer.test(model, datamodule=datamodule, ckpt_path=test_ckpt)
 
         if test_ckpt:
-            strip_encoder_from_checkpoint(Path(test_ckpt))
-
-        if test_ckpt:
             load_checkpoint_weights(model, test_ckpt, device)
 
         if not args.skip_biome_metrics:
@@ -1666,6 +1705,11 @@ def main() -> None:
                 bolp_module=bolp_module,
                 max_batches=args.limit_biome_metric_batches,
             )
+
+        if test_ckpt:
+            strip_encoder_from_checkpoint(test_ckpt)
+        if last_path and last_path != test_ckpt:
+            strip_encoder_from_checkpoint(last_path)
 
 
 if __name__ == "__main__":

@@ -219,6 +219,7 @@ class MMEarthDynamicWorldSegmentationDataModule(LightningDataModule):
         fallback_val_fraction: float = 0.1,
         fallback_test_fraction: float = 0.0,
         seed: int = 0,
+        train_samples: int | None = None,
         **_: Any,
     ) -> None:
         super().__init__()
@@ -231,6 +232,7 @@ class MMEarthDynamicWorldSegmentationDataModule(LightningDataModule):
         self.fallback_val_fraction = fallback_val_fraction
         self.fallback_test_fraction = fallback_test_fraction
         self.seed = seed
+        self.train_samples = train_samples
         self._split_indices: dict[str, list[int]] | None = None
         self.train_dataset: MMEarthDynamicWorldSegmentationDataset | None = None
         self.val_dataset: MMEarthDynamicWorldSegmentationDataset | None = None
@@ -274,6 +276,8 @@ class MMEarthDynamicWorldSegmentationDataModule(LightningDataModule):
         needs_val = not val_indices and self.fallback_val_fraction > 0
         needs_test = not test_indices and self.fallback_test_fraction > 0
         if not needs_val and not needs_test:
+            if self.train_samples is not None and self.train_samples > 0:
+                train_indices = train_indices[: self.train_samples]
             return {"train": train_indices, "val": val_indices, "test": test_indices}
 
         if not train_indices:
@@ -303,6 +307,8 @@ class MMEarthDynamicWorldSegmentationDataModule(LightningDataModule):
         val_set = set(val_indices)
         test_set = set(test_indices)
         fallback_train = [idx for idx in train_indices if idx not in val_set and idx not in test_set]
+        if self.train_samples is not None and self.train_samples > 0:
+            fallback_train = fallback_train[: self.train_samples]
         return {"train": fallback_train, "val": val_indices, "test": test_indices}
 
     def teardown(self, stage: str | None = None) -> None:

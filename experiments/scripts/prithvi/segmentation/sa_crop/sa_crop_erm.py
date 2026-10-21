@@ -452,7 +452,7 @@ class BiomeMacroF1Logger(Callback):
         if len(valid) >= 2:
             print(f"\n  Fairness Metrics [F1]:")
             print(f"  Worst-case F1 : {np.min(valid):.4f}")
-            print(f"  Std F1        : {np.std(valid):.4f}")
+            print(f"  Std F1        : {(np.std(valid, ddof=1) if len(valid) > 1 else 0.0):.4f}")
             print(f"  PER F1        : {np.min(valid)/np.max(valid):.4f}")
         print(f"  {'─'*54}")
 
@@ -547,7 +547,7 @@ class BiomeMIoULogger(Callback):
             worst_miou = float(np.min(valid_ious))
             best_miou  = float(np.max(valid_ious))
             mean_miou  = float(np.mean(valid_ious))
-            std_miou   = float(np.std(valid_ious))
+            std_miou   = float((np.std(valid_ious, ddof=1) if len(valid_ious) > 1 else 0.0))
             per_ratio  = float(worst_miou / best_miou) if best_miou > 0 else None
             gini_coef  = compute_gini(valid_ious)
             nfr        = float((best_miou - worst_miou) / np.mean(valid_ious)) if np.mean(valid_ious) > 0 else float("nan")

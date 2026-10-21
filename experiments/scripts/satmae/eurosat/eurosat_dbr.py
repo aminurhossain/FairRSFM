@@ -745,7 +745,7 @@ class BiomeFairnessLogger(Callback):
         worst_f1  = min(f1_vals) if f1_vals else float("nan")
         best_f1   = max(f1_vals) if f1_vals else float("nan")
         mean_f1   = float(np.mean(f1_vals)) if f1_vals else float("nan")
-        f1_std    = float(np.std(f1_vals)) if f1_vals else 0.0
+        f1_std    = float((np.std(f1_vals, ddof=1) if len(f1_vals) > 1 else 0.0)) if f1_vals else 0.0
         per       = (worst_f1 / best_f1) if (best_f1 > 0 and not np.isnan(worst_f1)) else 0.0
         nfr       = (best_f1 - worst_f1) / global_macro_f1 if global_macro_f1 > 0 else float("nan")
         gini      = compute_gini(f1_vals)

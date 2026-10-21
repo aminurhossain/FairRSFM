@@ -594,7 +594,7 @@ class BiomeMultiLabelLogger(Callback):
             worst_f1  = float(np.min(valid_f1s))
             best_f1   = float(np.max(valid_f1s))
             mean_f1   = float(np.mean(valid_f1s))
-            std_f1    = float(np.std(valid_f1s))
+            std_f1    = float((np.std(valid_f1s, ddof=1) if len(valid_f1s) > 1 else 0.0))
             per_ratio = float(worst_f1 / best_f1) if best_f1 > 0 else float("nan")
             gini_coef = compute_gini(valid_f1s)
             nfr       = float((best_f1 - worst_f1) / mean_f1) if mean_f1 > 0 else float("nan")

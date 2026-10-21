@@ -615,7 +615,7 @@ class BiomeSegmentationLogger(Callback):
             worst_miou = float(np.min(valid_mious))
             best_miou  = float(np.max(valid_mious))
             mean_miou  = float(np.mean(valid_mious))
-            std_miou   = float(np.std(valid_mious))
+            std_miou   = float((np.std(valid_mious, ddof=1) if len(valid_mious) > 1 else 0.0))
             per_ratio  = float(worst_miou / best_miou) if best_miou > 0 else float("nan")
             gini_coef  = compute_gini(valid_mious)
             nfr        = float((best_miou - worst_miou) / mean_miou) if mean_miou > 0 else float("nan")
