@@ -70,6 +70,7 @@ except ImportError as e:
     raise ImportError(f"Could not import SatMAE group channels architecture from {SATMAE_DIR}: {e}")
 
 from sklearn.metrics import average_precision_score, f1_score
+from fairrsfm.evaluation.metrics import compute_ece_multilabel
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -363,7 +364,7 @@ class SatMAEMultiLabelLinearProbe(nn.Module):
 
 def find_optimal_thresholds(y_true: np.ndarray, probs: np.ndarray, num_classes: int) -> np.ndarray:
     thresholds = np.full(num_classes, 0.5)
-    candidates = np.linspace(0.05, 0.95, 19)
+    candidates = np.linspace(0.10, 0.90, 17)
     for c in range(num_classes):
         yt_c = y_true[:, c]
         if yt_c.sum() == 0:
@@ -422,24 +423,6 @@ def compute_gini(values: list) -> float:
     return float(np.sum((2 * index - n - 1) * arr) / (n * sum_val))
 
 
-def compute_ece_metric(y_true: np.ndarray, probs: np.ndarray, preds: np.ndarray, n_bins: int = 10) -> float:
-    if len(y_true) == 0:
-        return float("nan")
-    eces = []
-    bin_boundaries = np.linspace(0, 1, n_bins + 1)
-    for c in range(y_true.shape[1]):
-        if y_true[:, c].sum() == 0:
-            continue
-        pr_c = probs[:, c]
-        acc_c = (preds[:, c] == y_true[:, c]).astype(float)
-        ece_c = 0.0
-        for i in range(n_bins):
-            in_bin = (pr_c > bin_boundaries[i]) & (pr_c <= bin_boundaries[i+1])
-            prop = in_bin.mean()
-            if prop > 0:
-                ece_c += np.abs(pr_c[in_bin].mean() - acc_c[in_bin].mean()) * prop
-        eces.append(ece_c)
-    return float(np.mean(eces)) if eces else float("nan")
 
 
 def compute_equalized_odds(biome_data: dict, num_classes: int) -> float:
@@ -735,7 +718,7 @@ class BiomeMultiLabelLogger(Callback):
             present_c = [c for c in range(self.num_classes) if yt[:, c].sum() > 0]
             b_map = float(average_precision_score(yt[:, present_c], pr[:, present_c], average="macro")) if present_c else float("nan")
             b_acc = float(((yp_opt == yt).all(axis=1)).mean())
-            b_ece = compute_ece_metric(yt, pr, yp_opt)
+            b_ece = compute_ece_multilabel(yt, pr)
             b_count = len(yt)
 
             biome_macro_f1[b] = b_f1
@@ -792,6 +775,7 @@ class BiomeMultiLabelLogger(Callback):
 
         res_dict = {
             "epoch": epoch,
+            "optimal_thresholds": self.opt_thresholds.tolist(),
             "overall_macro_f1_opt": global_macro_f1_opt,
             "overall_macro_f1_05": global_macro_f1_05,
             "overall_micro_f1": global_micro_f1,

@@ -1359,6 +1359,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=EPOCHS, help="Number of training epochs (default: %(default)s)")
     parser.add_argument("--seed", type=int, default=SEED, help="Random seed (default: 42)")
     parser.add_argument("--gpu", type=str, default="0", help="CUDA GPU device ID (default: 0)")
+    parser.add_argument("--out-dir", type=str, default=None, help="Custom output directory")
     parser.add_argument("--resume-from", type=str, default=None, help="Path to checkpoint to resume training from")
     args = parser.parse_args()
 
@@ -1370,7 +1371,7 @@ def main():
 
     dbr_tag = f"dbr_alpha{DBR_ALPHA}_ema{DBR_EMA}" if USE_DBR else "erm"
     mode_str = f"sa_crop_{'lp' if FREEZE_BACKBONE else 'ft'}_{dbr_tag}"
-    OUT_DIR  = BASE_DIR / f"runs/{mode_str}/seed_{seed}"
+    OUT_DIR  = Path(args.out_dir) if args.out_dir else BASE_DIR / f"runs/{mode_str}/seed_{seed}"
     CKPT_DIR = OUT_DIR  / "checkpoints"
 
     for p in [DATA_DIR, BIOME_JSON, WEIGHTS_PT]:
@@ -1515,7 +1516,7 @@ def main():
     )
 
     tb_logger = TensorBoardLogger(
-        save_dir = BASE_DIR / "runs",
+        save_dir = OUT_DIR / "tb_logs",
         name     = mode_str,
         version  = 0,
     )
@@ -1552,13 +1553,18 @@ def main():
         print(f"[Done] Best Worst-Case Score      : {ckpt_worst_cb.best_model_score:.4f}")
 
     # ── Test Evaluation on Best Macro mIoU Checkpoint ──
+    # Lightning restores callback state during test; retain both fitted paths.
+    selected_macro_path = ckpt_macro_cb.best_model_path
+    selected_worst_path = ckpt_worst_cb.best_model_path
     print("\n[Test] Running evaluation on Best Macro mIoU Checkpoint...")
-    trainer.test(lp_model, test_loader, ckpt_path=ckpt_macro_cb.best_model_path)
-
-    # ── Test Evaluation on Best Worst-Case mIoU Checkpoint ──
-    if ckpt_worst_cb.best_model_path:
-        print("\n[Test] Running evaluation on Best Worst-Case Biome mIoU Checkpoint...")
-        trainer.test(lp_model, test_loader, ckpt_path=ckpt_worst_cb.best_model_path)
+    trainer.test(lp_model, test_loader, ckpt_path=selected_macro_path)
+    if not biome_cb.test_history:
+        raise RuntimeError("Selected checkpoint produced no test biome metrics")
+    (OUT_DIR / "test_selected.json").write_text(json.dumps({
+        "checkpoint": selected_macro_path,
+        "selection": "best validation macro mIoU",
+        "metrics": biome_cb.test_history[-1],
+    }, indent=2))
 
     # ── Save trainable weights (decoder + head only) ──
     ckpt_path = CKPT_DIR / f"{mode_str}_weights.pt"
@@ -1573,6 +1579,10 @@ def main():
         "freeze_backbone": True,
     }, ckpt_path)
     print(f"[Done] Trainable weights saved: {ckpt_path}")
+    # Export above belongs to the primary, validation-selected checkpoint.
+    if selected_worst_path:
+        print("\n[Test] Running evaluation on Best Worst-Case Biome mIoU Checkpoint...")
+        trainer.test(lp_model, test_loader, ckpt_path=selected_worst_path)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

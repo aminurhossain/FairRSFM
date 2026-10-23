@@ -126,6 +126,8 @@ while ROOT_DIR.parent != ROOT_DIR:
         break
     ROOT_DIR = ROOT_DIR.parent
 BASE_DIR = ROOT_DIR
+sys.path.insert(0, str(ROOT_DIR / "src"))
+from fairrsfm.evaluation.metrics import compute_ece_multilabel
 
 DATA_DIR = BASE_DIR / "Geobench"
 if not DATA_DIR.exists() and os.environ.get("GEO_BENCH_DIR"):
@@ -167,7 +169,7 @@ BANDS = [
 ]
 PRITHVI_BAND_INDICES = [1, 2, 3, 7, 10, 11]
 
-BATCH_SIZE   = 256
+BATCH_SIZE   = 64
 EPOCHS = 50
 LR           = 1e-4
 WEIGHT_DECAY = 0.1
@@ -431,20 +433,6 @@ def find_optimal_thresholds(all_labels: np.ndarray,
     return thresholds
 
 
-def compute_ece(y_true_flat, probs_max, preds_flat, n_bins=10):
-    if len(y_true_flat) == 0:
-        return float("nan")
-    correct = (preds_flat == y_true_flat).astype(float)
-    ece_val, n = 0.0, len(y_true_flat)
-    bins = np.linspace(0, 1, n_bins + 1)
-    for i in range(n_bins):
-        mask = (probs_max > bins[i]) & (probs_max <= bins[i + 1])
-        if mask.sum() == 0:
-            continue
-        ece_val += (mask.sum()/n) * abs(
-            correct[mask].mean() - probs_max[mask].mean()
-        )
-    return float(ece_val)
 
 def compute_map_score(y_true: np.ndarray, probs: np.ndarray, num_classes: int) -> float:
     try:
@@ -535,6 +523,10 @@ class ClassifLinearProbe(L.LightningModule):
             keys_to_remove = [k for k in list(state_dict.keys()) if k.startswith("model.encoder.")]
             for k in keys_to_remove:
                 del state_dict[k]
+        if self.projector is not None:
+            checkpoint["bolp_biome_index"] = self.projector.biome_index
+            checkpoint["bolp_skip_residualization"] = self.projector.skip_residualization
+            checkpoint["bolp_k"] = self.projector.k
 
     def on_load_checkpoint(self, checkpoint):
         if FREEZE_BACKBONE:
@@ -672,6 +664,7 @@ class BiomeMacroF1Logger(Callback):
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.val_history  = []
         self.test_history = []
+        self.opt_thresholds = None
         
     def _compute_and_log(self, biome_data, epoch, tb, tb_prefix, label, pl_module=None):
         biome_data = {b: d for b, d in biome_data.items() if b != "Unknown"}
@@ -681,7 +674,11 @@ class BiomeMacroF1Logger(Callback):
 
         all_labels = np.concatenate([d["true"] for d in biome_data.values()], axis=0)
         all_probs = np.concatenate([d["probs"] for d in biome_data.values()], axis=0)
-        optimal_thresholds = find_optimal_thresholds(all_labels, all_probs, self.num_classes)
+        if label == "val":
+            self.opt_thresholds = find_optimal_thresholds(all_labels, all_probs, self.num_classes)
+        if self.opt_thresholds is None:
+            raise RuntimeError("Validation thresholds must be fitted before test evaluation")
+        optimal_thresholds = self.opt_thresholds
         
         for group, d in biome_data.items():
             probs = np.array(d["probs"])
@@ -713,12 +710,12 @@ class BiomeMacroF1Logger(Callback):
             if present:
                 f1 = float(f1_score(y_true[:, present], y_pred[:, present], average="macro", zero_division=0))
             else:
-                f1 = 0.0
+                f1 = None  # No positive labels in this group: macro-F1 is undefined.
 
             micro_f1 = float(f1_score(y_true, y_pred, average="micro", zero_division=0))
             map_score = compute_map_score(y_true, probs, self.num_classes)
             acc = float((y_pred == y_true).all(axis=1).mean())
-            ece = compute_ece(y_true.max(axis=1), probs.max(axis=1), y_pred.max(axis=1))
+            ece = compute_ece_multilabel(y_true, probs)
 
             group_f1s[group]    = f1
             group_micro_f1s[group] = micro_f1
@@ -727,7 +724,8 @@ class BiomeMacroF1Logger(Callback):
             group_eces[group]   = ece
             group_counts[group] = n
 
-            print(f"  {group:<44}  {f1:>8.4f}  {map_score:>7.4f}  {acc:>7.4f}  {ece:>7.4f}")
+            f1_text = f"{f1:>8.4f}" if f1 is not None else "     n/a"
+            print(f"  {group:<44}  {f1_text}  {map_score:>7.4f}  {acc:>7.4f}  {ece:>7.4f}")
 
         # Option B (class-level disparities)
         biomes  = sorted(biome_data.keys())
@@ -788,14 +786,21 @@ class BiomeMacroF1Logger(Callback):
         all_yp = np.concatenate([d["pred"] for d in biome_data.values()])
         all_pr = np.concatenate([d["probs"] for d in biome_data.values()])
 
-        overall_f1  = float(f1_score(all_yt, all_yp, average="macro", zero_division=0))
+        overall_present = [c for c in range(self.num_classes) if all_yt[:, c].sum() > 0]
+        overall_f1 = float(f1_score(
+            all_yt[:, overall_present], all_yp[:, overall_present],
+            average="macro", zero_division=0,
+        )) if overall_present else None
         overall_micro_f1 = float(f1_score(all_yt, all_yp, average="micro", zero_division=0))
         
         best_overall_macro = 0.0
         best_overall_micro = 0.0
         for t in np.linspace(0.1, 0.9, 17):
             yp_t = (all_pr > t).astype(int)
-            mac = f1_score(all_yt, yp_t, average="macro", zero_division=0)
+            mac = f1_score(
+                all_yt[:, overall_present], yp_t[:, overall_present],
+                average="macro", zero_division=0,
+            ) if overall_present else 0.0
             mic = f1_score(all_yt, yp_t, average="micro", zero_division=0)
             if mac > best_overall_macro: best_overall_macro = mac
             if mic > best_overall_micro: best_overall_micro = mic
@@ -834,7 +839,7 @@ class BiomeMacroF1Logger(Callback):
                 pl_module.log("val/worst_case_accuracy", worst_acc, on_step=False, on_epoch=True, sync_dist=True)
 
         print(f"\n  ── Representational Fairness & Overall Performance ────────────────────────")
-        print(f"  {'Overall Macro F1':<44}  {overall_f1:.4f}")
+        print(f"  {'Overall Macro F1':<44}  {overall_f1 if overall_f1 is not None else float('nan'):.4f}")
         print(f"  {'Worst-case Macro F1':<44}  {worst_f1 if worst_f1 is not None else float('nan'):.4f}")
         print(f"  {'Best-case Macro F1':<44}  {best_f1 if best_f1 is not None else float('nan'):.4f}")
         print(f"  {'Overall mAP':<44}  {overall_map:.4f}")
@@ -852,6 +857,7 @@ class BiomeMacroF1Logger(Callback):
 
         payload = {
             "epoch": epoch,
+            "optimal_thresholds": optimal_thresholds.tolist(),
             "overall_macro_f1": overall_f1,
             "overall_micro_f1": overall_micro_f1,
             "opt_overall_macro_f1": float(best_overall_macro),
@@ -985,9 +991,13 @@ def main():
     parser.add_argument("--epochs", type=int, default=EPOCHS, help="Number of training epochs (default: %(default)s)")
     parser.add_argument("--seed", type=int, default=SEED, help="Random seed (default: 42)")
     parser.add_argument("--gpu", type=str, default="0", help="CUDA GPU device ID (default: 0)")
+    parser.add_argument("--out-dir", type=str, default=None, help="Custom output directory")
+    parser.add_argument("--batch-size", type=int, default=BATCH_SIZE, help="Images per batch (shared-GPU default: 64)")
     parser.add_argument("--resume-from", type=str, default=None, help="Path to checkpoint to resume training from")
     parser.add_argument("--skip-resid", action="store_true", help="Skip residualization step for ablation studies")
     args = parser.parse_args()
+    if args.batch_size < 1:
+        parser.error("--batch-size must be positive")
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
     seed = args.seed
@@ -997,7 +1007,7 @@ def main():
 
     resid_tag = "no_resid" if args.skip_resid else "full"
     mode_str  = f"bigearthnet_lp_bolp_{resid_tag}"
-    OUT_DIR   = BASE_DIR / f"runs/{mode_str}/seed_{seed}"
+    OUT_DIR   = Path(args.out_dir) if args.out_dir else BASE_DIR / f"runs/{mode_str}/seed_{seed}"
     CKPT_DIR  = OUT_DIR  / "checkpoints"
 
     for p in [DATA_DIR, BIOME_JSON, WEIGHTS_PT]:
@@ -1044,11 +1054,11 @@ def main():
     val_ds   = GeoBenchClassifDataset(task, "valid", biome_map, augment=False)
     test_ds  = GeoBenchClassifDataset(task, "test",  biome_map, augment=False)
 
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True,
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
                               num_workers=NUM_WORKERS, pin_memory=True, persistent_workers=True)
-    val_loader   = DataLoader(val_ds,   batch_size=BATCH_SIZE, shuffle=False,
+    val_loader   = DataLoader(val_ds,   batch_size=args.batch_size, shuffle=False,
                               num_workers=NUM_WORKERS, pin_memory=True, persistent_workers=True)
-    test_loader  = DataLoader(test_ds,  batch_size=BATCH_SIZE, shuffle=False,
+    test_loader  = DataLoader(test_ds,  batch_size=args.batch_size, shuffle=False,
                               num_workers=NUM_WORKERS, pin_memory=True, persistent_workers=True)
 
     base_model = build_model(WEIGHTS_PT, NUM_CLASSES)
@@ -1116,7 +1126,7 @@ def main():
     )
     progress_bar_cb = CleanProgressBar(refresh_rate=20)
 
-    tb_logger = TensorBoardLogger(save_dir=BASE_DIR / "runs", name=mode_str, version=0)
+    tb_logger = TensorBoardLogger(save_dir=OUT_DIR / "tb_logs", name=mode_str, version=0)
 
     trainer = L.Trainer(
         accelerator             = "gpu",

@@ -24,12 +24,17 @@ from sklearn.metrics import accuracy_score, f1_score
 ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
+from evaluation.checkpoint import load_finetuned_state
+from evaluation.serialization import json_safe
+from evaluation.proj import ensure_proj_data
+ensure_proj_data()
 
 import geobench
 import geobench.task
 
 from models.dofa_wrapper import DOFAClassifier
 from evaluation.metrics import (
+    single_label_group_diagnostics,
     compute_subgroup_macro_f1,
     compute_per_class_f1,
     compute_ece_single_label,
@@ -105,7 +110,7 @@ class DOFABOLPClassifier(nn.Module):
         super().__init__()
         self.encoder = DOFAClassifier(
             num_classes=0,
-            model_type="vit_base_patch16_224",
+            model_type="dofa_base_patch16_224",
             checkpoint_path=checkpoint_path,
             freeze_backbone=True
         )
@@ -138,12 +143,12 @@ def build_and_load_model(ckpt_path: Path, backbone_weights: Path, device: torch.
     else:
         model = DOFAClassifier(
             num_classes=NUM_CLASSES,
-            model_type="vit_base_patch16_224",
+            model_type="dofa_base_patch16_224",
             checkpoint_path=str(backbone_weights) if backbone_weights.exists() else None,
             freeze_backbone=True
         )
 
-    model.load_state_dict(cleaned, strict=False)
+    load_finetuned_state(model, cleaned)
     model.to(device)
     model.eval()
     return model
@@ -184,7 +189,7 @@ def evaluate(model, test_loader, biome_map, device, num_classes=10):
     all_pred  = np.array(all_pred)
     all_probs = np.array(all_probs)
 
-    global_macro_f1 = float(f1_score(all_true, all_pred, average="macro", zero_division=0))
+    global_macro_f1 = compute_subgroup_macro_f1(all_true, all_pred, num_classes)
     global_micro_f1 = float(f1_score(all_true, all_pred, average="micro", zero_division=0))
     global_acc      = float(accuracy_score(all_true, all_pred))
     global_map      = compute_map_score_single_label(all_true, all_probs, num_classes)
@@ -225,6 +230,15 @@ def evaluate(model, test_loader, biome_map, device, num_classes=10):
     ece_vals = [v for v in biome_eces.values() if not np.isnan(v)]
     ece_disp = (max(ece_vals) - min(ece_vals)) if ece_vals else float("nan")
 
+    group_diagnostics = single_label_group_diagnostics(
+        {b: (np.asarray(d["true"]), np.asarray(d["pred"]))
+         for b, d in biome_data.items() if len(d["true"])},
+        num_classes,
+        bootstrap_replicates=1000,
+    )
+    for b, diagnostics in group_diagnostics.items():
+        if b in per_group_metrics:
+            per_group_metrics[b]["diagnostics"] = diagnostics
     results = {
         "global_macro_f1": global_macro_f1,
         "global_micro_f1": global_micro_f1,
@@ -251,9 +265,9 @@ def evaluate(model, test_loader, biome_map, device, num_classes=10):
 def main():
     parser = argparse.ArgumentParser(description="Evaluate DOFA EuroSAT Checkpoint")
     parser.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint .ckpt file")
-    parser.add_argument("--backbone_ckpt", type=str, default=str(ROOT_DIR / "checkpoints/dofa/dofa_base_patch16_224.pth"))
+    parser.add_argument("--backbone_ckpt", type=str, default=str(ROOT_DIR.parents[1] / "checkpoints/dofa/dofa_base_patch16_224.pth"))
     parser.add_argument("--data_dir", type=str, default=None, help="Path to GeoBench data root")
-    parser.add_argument("--biome_json", type=str, default=str(ROOT_DIR / "configs/eurosat_biome_mapping.json"))
+    parser.add_argument("--biome_json", type=str, default=str(ROOT_DIR.parents[1] / "experiments/configs/data_mappings/eurosat_biome_mapping.json"))
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--gpu", type=str, default="0")
     parser.add_argument("--out_json", type=str, default=None, help="Output JSON path")
@@ -261,9 +275,9 @@ def main():
 
     device = torch.device(f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu")
 
-    data_dir = Path(args.data_dir) if args.data_dir else (ROOT_DIR / "configs/geobench")
+    data_dir = Path(args.data_dir) if args.data_dir else Path(os.environ.get("GEO_BENCH_DIR", "/data1/aminur/dataset/geobench"))
     if not data_dir.exists():
-        data_dir = ROOT_DIR / "Geobench"
+        raise FileNotFoundError(f"GeoBench data directory not found: {data_dir}")
     benchmark_dir = data_dir / "classification_v1.0"
 
     tasks = list(geobench.task_iterator(benchmark_name="classification_v1.0", benchmark_dir=str(benchmark_dir)))
@@ -294,7 +308,7 @@ def main():
     out_path = Path(args.out_json) if args.out_json else Path(args.ckpt).parent / "test_results.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as f:
-        json.dump(results, f, indent=2)
+        json.dump(json_safe(results), f, indent=2, allow_nan=False)
     print(f"Results saved to: {out_path}\n")
 
 

@@ -2,6 +2,12 @@
 
 [Back to the main README](../README.md)
 
+These are transcribed historical submission results. They predate the unified
+validation threshold grid and per-label BigEarthNet ECE protocol in
+[metric definitions](metric-definitions.md). Do not combine them with new runs
+or treat them as reproduced by the current repository until the three-seed
+experiments have been rerun and their checkpoints and split metadata audited.
+
 ## Reporting Conventions
 
 - Values are percentages and reported as `mean +/- standard deviation` over three independent seeds.

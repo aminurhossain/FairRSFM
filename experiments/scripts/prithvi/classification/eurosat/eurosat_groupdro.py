@@ -106,6 +106,8 @@ while ROOT_DIR.parent != ROOT_DIR:
         break
     ROOT_DIR = ROOT_DIR.parent
 BASE_DIR = ROOT_DIR
+sys.path.insert(0, str(BASE_DIR / "src"))
+from fairrsfm.evaluation.metrics import single_label_group_diagnostics
 
 DATA_DIR = BASE_DIR / "Geobench"
 if not DATA_DIR.exists() and os.environ.get("GEO_BENCH_DIR"):
@@ -675,6 +677,26 @@ class BiomeMacroF1Logger(Callback):
         print(f"  {'Demographic Parity Disparity':<44}  {dpm_disp if not np.isnan(dpm_disp) else float('nan'):.4f}")
         print(f"{'═'*82}\n")
 
+        group_diagnostics = single_label_group_diagnostics(
+            {g: (np.asarray(d["true"]), np.asarray(d["pred"]))
+             for g, d in biome_data.items() if len(d["true"])},
+            self.num_classes,
+        )
+        for group, diagnostics in group_diagnostics.items():
+            print(
+                f"  [Class support] {group}: n={diagnostics['sample_count']}, "
+                f"GT classes={diagnostics['ground_truth_class_count']}, "
+                f"low_support={diagnostics['low_support']}, "
+                f"F1(GT)={diagnostics['macro_f1_gt_present']:.4f}, "
+                f"F1(union)={diagnostics['macro_f1_union']:.4f}"
+            )
+            for cls in diagnostics["per_class"]:
+                if cls["true_count"] or cls["predicted_count"]:
+                    print(
+                        f"    class {cls['class_id']}: true={cls['true_count']} "
+                        f"pred={cls['predicted_count']} F1={cls['f1']:.4f}"
+                    )
+
         payload = {
             "epoch": epoch,
             "overall_macro_f1": overall_f1,
@@ -694,7 +716,7 @@ class BiomeMacroF1Logger(Callback):
             "equalized_odds_disparity": eqodds_disp,
             "demographic_parity_disparity": dpm_disp,
             "per_group_metrics": {
-                g: {"macro_f1": group_f1s[g], "micro_f1": group_micro_f1s[g], "mAP": group_maps[g], "accuracy": group_accs[g], "ece": group_eces[g], "sample_count": group_counts[g]}
+                g: {"macro_f1": group_f1s[g], "micro_f1": group_micro_f1s[g], "mAP": group_maps[g], "accuracy": group_accs[g], "ece": group_eces[g], "sample_count": group_counts[g], "diagnostics": group_diagnostics[g]}
                 for g in group_f1s
             }
         }

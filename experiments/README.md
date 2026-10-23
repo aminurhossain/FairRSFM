@@ -1,6 +1,9 @@
 # Experiments
 
-This directory provides the execution runners and reproducible configurations for all 48 FairRSFM benchmark configurations (3 Foundation Models × 4 Datasets × 4 Mitigation Methods).
+This directory contains the training launcher, experiment scripts, and
+configuration drafts for the benchmark combinations. Training scripts currently
+hold several settings directly; the YAML files are reference material until
+configuration loading is consolidated.
 
 ```text
 experiments/
@@ -11,10 +14,33 @@ experiments/
 |   |-- methods/      # ERM, DBR, BOLP, and GroupDRO hyperparameters
 |   `-- data_mappings/# Biome lookup JSON mappings
 |-- scripts/          # Canonical experiment scripts
-`-- outputs/          # Local logs, checkpoints, and predictions (not tracked in git)
+`-- run_prithvi_matrix.py  # Isolated Prithvi matrix launcher
 ```
 
 ## Running Training
+
+### Prithvi ERM and BOLP audit matrix
+
+From the repository root, launch one full 50-epoch seed across all four datasets.
+The two entries in `--gpus` create two concurrent workers. Repeating `0` runs
+both on the same GPU, so check available GPU memory before starting.
+
+```bash
+python experiments/run_prithvi_matrix.py --methods erm bolp --seeds 42 \
+    --epochs 50 --gpus 0 0 --run-id prithvi_erm_bolp_audit_20261022
+```
+
+The launcher writes a manifest, command, status, checkpoints, metrics, and logs
+under `runs/prithvi_matrix/<run-id>/`. It refuses an existing run ID. Use
+`--dry-run` to inspect the queue. After checking the first seed and checkpoint
+evaluations, use `--seeds 42 43 44` with a new run ID for the three-seed
+comparison. The two workers share GPU memory when both IDs are `0`.
+
+The metric definitions are in [`../docs/metric-definitions.md`](../docs/metric-definitions.md).
+Checkpoint evaluation still requires a separate audit before results are used
+in a paper; see [`../docs/cleanup-status.md`](../docs/cleanup-status.md).
+
+### Single run
 
 You can launch any experiment via the unified training dispatcher:
 
@@ -46,8 +72,9 @@ python experiments/train.py --model dofa --dataset sa_crop --method bolp --seed 
 * `--epochs`: Maximum training epochs.
 * `--lr`: Learning rate for task head probe.
 * `--gpu`: GPU device ID (e.g. `0`).
-* `--output_dir`: Output directory for checkpoints and logs (defaults to `experiments/outputs/`).
+* `--output_dir`: Output directory when supported by the selected training script; the Prithvi matrix passes an isolated directory for every job.
 
 ## Output Policy
 
-The `outputs/` directory is intentionally excluded from version control. Checkpoints and evaluation predictions will be written to `outputs/` during runs without cluttering git tracking.
+Training outputs go under the ignored `runs/` directory. The Prithvi matrix
+launcher creates one folder per dataset, method, and seed.

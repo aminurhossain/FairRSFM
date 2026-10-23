@@ -125,7 +125,9 @@ def main():
     parser.add_argument("--data_dir", "--data-dir", type=str, default=None, dest="data_dir", help="Dataset directory path")
     parser.add_argument("--output_dir", "--out_dir", "--out-dir", type=str, default=None, dest="output_dir", help="Output directory")
     parser.add_argument("--gpu", "--device", type=str, default=None, dest="gpu", help="GPU device ID (e.g. 0)")
+    parser.add_argument("--train_samples", "--train-samples", type=int, default=None, dest="train_samples", help="Limit training samples when supported")
 
+    parser.add_argument("--smoke-test", action="store_true", help="One epoch with bounded real-data batches; outputs are not benchmark results")
     args, unknown_args = parser.parse_known_args()
 
     script_path = get_script_path(args.model, args.dataset, args.method, args.head)
@@ -145,6 +147,10 @@ def main():
 
     # Configure environment
     env = os.environ.copy()
+    # Some training scripts (notably MMEarth) have no --gpu flag. Constrain the
+    # child process before it imports torch so the requested physical GPU is used.
+    if args.gpu is not None:
+        env["CUDA_VISIBLE_DEVICES"] = args.gpu
     src_dir = str(REPO_ROOT / "src")
     repo_dir = str(REPO_ROOT)
     upstream_satmae = str(REPO_ROOT / "src/fairrsfm/models/upstream/SatMAE")
@@ -180,6 +186,9 @@ def main():
     help_text = detect_supported_args(script_path, env)
 
     cmd = [sys.executable, str(script_path), "--seed", str(args.seed)]
+    if args.smoke_test:
+        cmd = [sys.executable, str(REPO_ROOT / "experiments/smoke_prithvi.py"),
+               str(script_path), "--seed", str(args.seed)]
 
     # Dynamic translation for batch size
     if args.batch_size is not None:
@@ -211,6 +220,12 @@ def main():
     # GPU
     if args.gpu is not None and "--gpu" in help_text:
         cmd.extend(["--gpu", str(args.gpu)])
+
+    if args.train_samples is not None:
+        if "--train-samples" in help_text:
+            cmd.extend(["--train-samples", str(args.train_samples)])
+        elif "--train_samples" in help_text:
+            cmd.extend(["--train_samples", str(args.train_samples)])
 
     # Pass any extra unknown arguments directly
     if unknown_args:

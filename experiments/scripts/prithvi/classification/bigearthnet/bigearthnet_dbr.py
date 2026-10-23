@@ -125,6 +125,8 @@ while ROOT_DIR.parent != ROOT_DIR:
         break
     ROOT_DIR = ROOT_DIR.parent
 BASE_DIR = ROOT_DIR
+sys.path.insert(0, str(ROOT_DIR / "src"))
+from fairrsfm.evaluation.metrics import compute_ece_multilabel
 
 DATA_DIR = BASE_DIR / "Geobench"
 if not DATA_DIR.exists() and os.environ.get("GEO_BENCH_DIR"):
@@ -395,20 +397,6 @@ def find_optimal_thresholds(all_labels: np.ndarray,
     return thresholds
 
 
-def compute_ece(y_true_flat, probs_max, preds_flat, n_bins=10):
-    if len(y_true_flat) == 0:
-        return float("nan")
-    correct = (preds_flat == y_true_flat).astype(float)
-    ece_val, n = 0.0, len(y_true_flat)
-    bins = np.linspace(0, 1, n_bins + 1)
-    for i in range(n_bins):
-        mask = (probs_max > bins[i]) & (probs_max <= bins[i + 1])
-        if mask.sum() == 0:
-            continue
-        ece_val += (mask.sum()/n) * abs(
-            correct[mask].mean() - probs_max[mask].mean()
-        )
-    return float(ece_val)
 
 def compute_map_score(y_true: np.ndarray, probs: np.ndarray, num_classes: int) -> float:
     try:
@@ -617,6 +605,7 @@ class BiomeMacroF1Logger(Callback):
         self.output_dir  = Path(output_dir)
         self.test_loader = test_loader
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.opt_thresholds = None
 
     def _compute_and_log(self, biome_data, epoch, tb, tb_prefix, label, pl_module=None):
         biome_data = {b: d for b, d in biome_data.items() if b != "Unknown"}
@@ -626,7 +615,11 @@ class BiomeMacroF1Logger(Callback):
 
         all_labels = np.concatenate([d["true"] for d in biome_data.values()], axis=0)
         all_probs = np.concatenate([d["probs"] for d in biome_data.values()], axis=0)
-        optimal_thresholds = find_optimal_thresholds(all_labels, all_probs, self.num_classes)
+        if label == "val":
+            self.opt_thresholds = find_optimal_thresholds(all_labels, all_probs, self.num_classes)
+        if self.opt_thresholds is None:
+            raise RuntimeError("Validation thresholds must be fitted before test evaluation")
+        optimal_thresholds = self.opt_thresholds
         
         for group, d in biome_data.items():
             probs = np.array(d["probs"])
@@ -663,7 +656,7 @@ class BiomeMacroF1Logger(Callback):
             micro_f1 = float(f1_score(y_true, y_pred, average="micro", zero_division=0))
             map_score = compute_map_score(y_true, probs, self.num_classes)
             acc = float((y_pred == y_true).all(axis=1).mean())
-            ece = compute_ece(y_true.max(axis=1), probs.max(axis=1), y_pred.max(axis=1))
+            ece = compute_ece_multilabel(y_true, probs)
 
             group_f1s[group]    = f1
             group_micro_f1s[group] = micro_f1
@@ -800,6 +793,7 @@ class BiomeMacroF1Logger(Callback):
 
         payload = {
             "epoch": epoch,
+            "optimal_thresholds": optimal_thresholds.tolist(),
             "overall_macro_f1": overall_f1,
             "overall_micro_f1": overall_micro_f1,
             "opt_overall_macro_f1": float(best_overall_macro),
@@ -933,6 +927,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=EPOCHS, help="Number of training epochs (default: %(default)s)")
     parser.add_argument("--seed", type=int, default=SEED, help="Random seed (default: 42)")
     parser.add_argument("--gpu", type=str, default="0", help="CUDA GPU device ID (default: 0)")
+    parser.add_argument("--out-dir", type=str, default=None, help="Custom output directory")
     parser.add_argument("--resume-from", type=str, default=None, help="Path to checkpoint to resume training from")
     args = parser.parse_args()
 
@@ -944,7 +939,7 @@ def main():
 
     dbr_tag  = f"dbr_alpha{DBR_ALPHA}_ema{DBR_EMA}" if USE_DBR else "erm"
     mode_str = f"bigearthnet_lp_{dbr_tag}"
-    OUT_DIR  = BASE_DIR / f"runs/{mode_str}/seed_{seed}"
+    OUT_DIR  = Path(args.out_dir) if args.out_dir else BASE_DIR / f"runs/{mode_str}/seed_{seed}"
     CKPT_DIR = OUT_DIR  / "checkpoints"
 
     for p in [DATA_DIR, BIOME_JSON, WEIGHTS_PT]:
@@ -1063,7 +1058,7 @@ def main():
     )
     progress_bar_cb = CleanProgressBar(refresh_rate=20)
 
-    tb_logger = TensorBoardLogger(save_dir=BASE_DIR / "runs", name=mode_str, version=0)
+    tb_logger = TensorBoardLogger(save_dir=OUT_DIR / "tb_logs", name=mode_str, version=0)
 
     trainer = L.Trainer(
         accelerator             = "gpu",

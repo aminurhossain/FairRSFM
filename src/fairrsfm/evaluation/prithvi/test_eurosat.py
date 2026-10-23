@@ -15,7 +15,6 @@ from collections import defaultdict
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.metrics import accuracy_score, f1_score
@@ -24,11 +23,15 @@ from sklearn.metrics import accuracy_score, f1_score
 ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
+from evaluation.checkpoint import load_finetuned_state
+from evaluation.prithvi.bolp import attach_classification_bolp
+from evaluation.serialization import json_safe
 
 try:
     import pyproj
-    os.environ.setdefault("PROJ_DATA", pyproj.datadir.get_data_dir())
-    os.environ.setdefault("PROJ_LIB", pyproj.datadir.get_data_dir())
+    if not (Path(os.environ.get("PROJ_DATA", "")) / "proj.db").is_file():
+        os.environ["PROJ_DATA"] = pyproj.datadir.get_data_dir()
+        os.environ["PROJ_LIB"] = pyproj.datadir.get_data_dir()
 except Exception:
     pass
 
@@ -39,6 +42,7 @@ from terratorch.models.backbones.prithvi_vit import HLSBands
 from terratorch.models.backbones import prithvi_vit
 
 from evaluation.metrics import (
+    single_label_group_diagnostics,
     compute_subgroup_macro_f1,
     compute_per_class_f1,
     compute_ece_single_label,
@@ -109,31 +113,6 @@ def load_biome_map(json_path: Path) -> dict:
     return biome_map
 
 
-class BOLPProjector(nn.Module):
-    def __init__(self, global_centroid: torch.Tensor, Pk: torch.Tensor,
-                 mu_table: torch.Tensor = None, biome_index: dict = None,
-                 k: int = 1, skip_residualization: bool = True):
-        super().__init__()
-        self.skip_residualization = skip_residualization
-        self.k = k
-        self.biome_index = biome_index or {}
-        self.register_buffer("mu0", global_centroid)
-        self.register_buffer("Pk", Pk)
-        if mu_table is not None:
-            self.register_buffer("mu_table", mu_table)
-        else:
-            self.mu_table = None
-
-    def forward(self, z: torch.Tensor, biome_ids: list = None) -> torch.Tensor:
-        z_tilde = z.clone()
-        if not self.skip_residualization and biome_ids is not None and self.mu_table is not None:
-            for i, biome in enumerate(biome_ids):
-                idx = self.biome_index.get(biome, None)
-                if idx is not None:
-                    z_tilde[i] = z[i] - self.mu_table[idx] + self.mu0
-        return z_tilde @ self.Pk.T
-
-
 def build_and_load_model(ckpt_path: Path, backbone_weights: Path, device: torch.device):
     print(f"[Loading] Checkpoint: {ckpt_path}")
     factory = PrithviModelFactory()
@@ -154,44 +133,12 @@ def build_and_load_model(ckpt_path: Path, backbone_weights: Path, device: torch.
     is_bolp = any("projector" in k or "Pk" in k for k in sd.keys())
     if is_bolp:
         print("[Model Type] Detected BOLP Checkpoint — attaching projection hook")
-        mu0 = sd.get("projector.mu0", torch.zeros(1024))
-        Pk = sd.get("projector.Pk", None)
-        if Pk is None:
-            for k in sd.keys():
-                if "Pk" in k:
-                    Pk = sd[k]
-                    break
-        mu_table = sd.get("projector.mu_table", None)
-        biome_index = ckpt.get("bolp_biome_index", {})
-        skip_resid = ckpt.get("bolp_skip_residualization", True)
-        bolp_k = ckpt.get("bolp_k", Pk.shape[0] if Pk is not None else 1)
-
-        projector = BOLPProjector(
-            global_centroid=mu0, Pk=Pk, mu_table=mu_table,
-            biome_index=biome_index, k=bolp_k, skip_residualization=skip_resid
-        )
-        projector.to(device)
-
-        def hook_fn(module, input, output):
-            if isinstance(output, (list, tuple)):
-                last = output[-1]
-            else:
-                last = output
-            if last.dim() > 2:
-                last = last.mean(dim=list(range(1, last.dim() - 1))) if last.dim() == 3 else last.mean(dim=[-2, -1])
-            last = projector(last)
-            if isinstance(output, (list, tuple)):
-                out_list = list(output)
-                out_list[-1] = last
-                return type(output)(out_list)
-            return last
-
-        base_model.encoder.register_forward_hook(hook_fn)
+        attach_classification_bolp(base_model, ckpt, sd, device)
     else:
         print("[Model Type] Detected Standard Head (ERM / GroupDRO / DBR)")
 
     model_sd = {k.replace("model.", "", 1): v for k, v in sd.items() if k.startswith("model.")}
-    base_model.load_state_dict(model_sd, strict=False)
+    load_finetuned_state(base_model, model_sd)
     base_model.to(device)
     base_model.eval()
 
@@ -205,6 +152,8 @@ def evaluate(base_model, test_loader, biome_map, device, num_classes=10):
     with torch.no_grad():
         for x, y, sample_ids in test_loader:
             x = x.to(device)
+            if hasattr(base_model, "bolp_projector"):
+                base_model.bolp_biome_ids = [biome_map.get(str(sid), "Unknown") for sid in sample_ids]
             out = base_model(x)
             logits = out.logits if hasattr(out, "logits") else (out.output if hasattr(out, "output") else out)
             probs  = torch.softmax(logits.float(), dim=-1).cpu().numpy()
@@ -227,7 +176,7 @@ def evaluate(base_model, test_loader, biome_map, device, num_classes=10):
     all_pred  = np.array(all_pred)
     all_probs = np.array(all_probs)
 
-    global_macro_f1 = float(f1_score(all_true, all_pred, average="macro", zero_division=0))
+    global_macro_f1 = compute_subgroup_macro_f1(all_true, all_pred, num_classes)
     global_micro_f1 = float(f1_score(all_true, all_pred, average="micro", zero_division=0))
     global_acc      = float(accuracy_score(all_true, all_pred))
     global_map      = compute_map_score_single_label(all_true, all_probs, num_classes)
@@ -246,6 +195,7 @@ def evaluate(base_model, test_loader, biome_map, device, num_classes=10):
         b_acc   = float(accuracy_score(yt, yp))
         b_map   = compute_map_score_single_label(yt, pr, num_classes)
         b_ece   = compute_ece_single_label(yt, pr, yp)
+        active_classes = [c for c in range(num_classes) if np.any(yt == c)]
 
         biome_macro_f1[b] = b_macro
         biome_eces[b]     = b_ece
@@ -257,12 +207,28 @@ def evaluate(base_model, test_loader, biome_map, device, num_classes=10):
             "map": b_map,
             "ece": b_ece,
             "count": len(yt),
+            "active_class_ids": active_classes,
+            "active_class_count": len(active_classes),
         }
 
     fairness = compute_fairness_summary(biome_macro_f1)
     eq_odds = compute_equalized_odds_single_label(biome_data, num_classes)
     dp_diff = compute_demographic_parity_single_label(biome_data, num_classes)
-    per_class_f1_overall, per_group_class_f1 = compute_per_class_f1(all_true, all_pred, biome_data, num_classes, CLASS_NAMES)
+    per_class_f1_overall = compute_per_class_f1(all_true, all_pred, num_classes).tolist()
+    per_group_class_f1 = {
+        b: compute_per_class_f1(np.asarray(d["true"]), np.asarray(d["pred"]), num_classes).tolist()
+        for b, d in biome_data.items()
+    }
+
+    group_diagnostics = single_label_group_diagnostics(
+        {b: (np.asarray(d["true"]), np.asarray(d["pred"]))
+         for b, d in biome_data.items() if len(d["true"])},
+        num_classes,
+        bootstrap_replicates=1000,
+    )
+    for b, diagnostics in group_diagnostics.items():
+        if b in per_group_metrics:
+            per_group_metrics[b]["diagnostics"] = diagnostics
 
     return {
         "global_macro_f1": global_macro_f1,
@@ -272,9 +238,9 @@ def evaluate(base_model, test_loader, biome_map, device, num_classes=10):
         "worst_case_macro_f1": fairness["worst_case"],
         "best_case_macro_f1": fairness["best_case"],
         "macro_f1_disparity": fairness["disparity"],
-        "performance_equity_ratio": fairness["performance_equity_ratio"],
-        "gini_coefficient": fairness["gini_coefficient"],
-        "normalized_fairness_range": fairness["normalized_fairness_range"],
+        "performance_equity_ratio": fairness["per"],
+        "gini_coefficient": fairness["gini"],
+        "normalized_fairness_range": fairness["nfr"],
         "equalized_odds_disparity": eq_odds,
         "demographic_parity_difference": dp_diff,
         "per_biome_macro_f1": biome_macro_f1,
@@ -289,9 +255,9 @@ def evaluate(base_model, test_loader, biome_map, device, num_classes=10):
 def main():
     parser = argparse.ArgumentParser(description="Evaluate Prithvi EuroSAT Checkpoint")
     parser.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint .ckpt file")
-    parser.add_argument("--backbone_ckpt", type=str, default=str(ROOT_DIR / "models/Prithvi_EO_V2_300M_TL.pt"))
+    parser.add_argument("--backbone_ckpt", type=str, default=str(ROOT_DIR.parents[1] / "checkpoints/Prithvi_EO_V2_300M_TL.pt"))
     parser.add_argument("--data_dir", type=str, default=None, help="Path to GeoBench data root")
-    parser.add_argument("--biome_json", type=str, default=str(ROOT_DIR / "configs/eurosat_biome_mapping.json"))
+    parser.add_argument("--biome_json", type=str, default=str(ROOT_DIR.parents[1] / "experiments/configs/data_mappings/eurosat_biome_mapping.json"))
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--gpu", type=str, default="0")
     parser.add_argument("--out_json", type=str, default=None, help="Output JSON path")
@@ -338,7 +304,7 @@ def main():
     out_json = Path(args.out_json) if args.out_json else Path(args.ckpt).parent / "test_results.json"
     out_json.parent.mkdir(parents=True, exist_ok=True)
     with open(out_json, "w") as f:
-        json.dump(results, f, indent=2)
+        json.dump(json_safe(results), f, indent=2, allow_nan=False)
     print(f"\n[Saved] Test results saved to: {out_json}")
 
 

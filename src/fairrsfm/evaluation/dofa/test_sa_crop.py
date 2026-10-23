@@ -23,11 +23,19 @@ from torch.utils.data import DataLoader
 ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
+from evaluation.checkpoint import load_finetuned_state
+from evaluation.serialization import json_safe
+from evaluation.proj import ensure_proj_data
+ensure_proj_data()
 
 import geobench
 import geobench.task
 
-from models.dofa_wrapper import DOFAClassifier, DOFASegmentationProbe, DOFAUperNet
+from models.dofa_wrapper import (
+    DOFAClassifier,
+    DOFASegmentationClassifier as DOFASegmentationProbe,
+    DOFAUperNetSegmentationClassifier as DOFAUperNet,
+)
 from evaluation.metrics import (
     compute_miou,
     compute_macro_f1_seg,
@@ -44,7 +52,7 @@ DOFA_BAND_NAMES = [
 ]
 DOFA_WAVELENGTHS = [0.66, 0.56, 0.49, 0.70, 0.74, 0.78, 0.84, 1.61, 2.20]
 NUM_CLASSES  = 10
-IGNORE_INDEX = 0
+IGNORE_INDEX = -1
 
 
 class GeoBenchSegDataset(torch.utils.data.Dataset):
@@ -102,7 +110,7 @@ class DOFABOLPSegmentationProbe(nn.Module):
         super().__init__()
         self.encoder = DOFAClassifier(
             num_classes=0,
-            model_type="vit_base_patch16_224",
+            model_type="dofa_base_patch16_224",
             checkpoint_path=checkpoint_path,
             freeze_backbone=True
         )
@@ -127,8 +135,7 @@ class DOFAUperNetBOLP(nn.Module):
         super().__init__()
         self.base_model = DOFAUperNet(
             num_classes=num_classes,
-            model_type="vit_base_patch16_224",
-            img_size=img_size,
+            model_type="dofa_base_patch16_224",
             checkpoint_path=checkpoint_path,
             freeze_backbone=True
         )
@@ -175,8 +182,7 @@ def build_and_load_model(ckpt_path: Path, backbone_weights: Path, device: torch.
         print("[Model Type] Detected DOFA UPerNet architecture (ERM / GroupDRO / DBR)")
         model = DOFAUperNet(
             num_classes=NUM_CLASSES,
-            model_type="vit_base_patch16_224",
-            img_size=224,
+            model_type="dofa_base_patch16_224",
             checkpoint_path=str(backbone_weights) if backbone_weights.exists() else None,
             freeze_backbone=True
         )
@@ -191,13 +197,13 @@ def build_and_load_model(ckpt_path: Path, backbone_weights: Path, device: torch.
         print("[Model Type] Detected DOFA Linear Probe architecture (ERM / GroupDRO / DBR)")
         model = DOFASegmentationProbe(
             num_classes=NUM_CLASSES,
-            model_type="vit_base_patch16_224",
+            model_type="dofa_base_patch16_224",
             img_size=224,
             checkpoint_path=str(backbone_weights) if backbone_weights.exists() else None,
             freeze_backbone=True
         )
 
-    model.load_state_dict(cleaned, strict=False)
+    load_finetuned_state(model, cleaned)
     model.to(device)
     model.eval()
     return model
@@ -275,9 +281,9 @@ def evaluate(model, test_loader, biome_map, device, num_classes=10):
         "worst_case_miou": fairness["worst_case"],
         "best_case_miou": fairness["best_case"],
         "miou_disparity": fairness["disparity"],
-        "performance_equity_ratio": fairness["performance_equity_ratio"],
-        "gini_coefficient": fairness["gini_coefficient"],
-        "normalized_fairness_range": fairness["normalized_fairness_range"],
+        "performance_equity_ratio": fairness["per"],
+        "gini_coefficient": fairness["gini"],
+        "normalized_fairness_range": fairness["nfr"],
         "equalized_odds_disparity": eq_odds,
         "demographic_parity_difference": dp_diff,
         "per_biome_miou": biome_mious,
@@ -291,9 +297,9 @@ def evaluate(model, test_loader, biome_map, device, num_classes=10):
 def main():
     parser = argparse.ArgumentParser(description="Evaluate DOFA SA-Crop Checkpoint")
     parser.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint .ckpt file")
-    parser.add_argument("--backbone_ckpt", type=str, default=str(ROOT_DIR / "models/dofa/DOFA_ViT_base_e100.pth"))
+    parser.add_argument("--backbone_ckpt", type=str, default=str(ROOT_DIR.parents[1] / "checkpoints/dofa/DOFA_ViT_base_e100.pth"))
     parser.add_argument("--data_dir", type=str, default=None, help="Path to GeoBench data root")
-    parser.add_argument("--biome_json", type=str, default=str(ROOT_DIR / "configs/sa_crop_biome_mapping.json"))
+    parser.add_argument("--biome_json", type=str, default=str(ROOT_DIR.parents[1] / "experiments/configs/data_mappings/sa_crop_biome_mapping.json"))
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--gpu", type=str, default="0")
     parser.add_argument("--out_json", type=str, default=None, help="Output JSON path")
@@ -339,7 +345,7 @@ def main():
     out_json = Path(args.out_json) if args.out_json else Path(args.ckpt).parent / "test_results.json"
     out_json.parent.mkdir(parents=True, exist_ok=True)
     with open(out_json, "w") as f:
-        json.dump(results, f, indent=2)
+        json.dump(json_safe(results), f, indent=2, allow_nan=False)
     print(f"\n[Saved] Test results saved to: {out_json}")
 
 

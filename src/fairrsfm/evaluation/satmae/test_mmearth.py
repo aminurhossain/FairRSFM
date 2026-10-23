@@ -23,14 +23,12 @@ from torch.utils.data import DataLoader
 ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
+from evaluation.checkpoint import load_finetuned_state
+from evaluation.serialization import json_safe
 
-# MMEarth dataset directory
-MMEARTH_DIR = ROOT_DIR / "methods/prithvi/segmentation/mmearth_20k"
-if str(MMEARTH_DIR) not in sys.path:
-    sys.path.insert(0, str(MMEARTH_DIR))
-
-from mmearth_dynamic_world_datamodule import (
+from fairrsfm.data.mmearth import (
     DYNAMIC_WORLD_CLASSES,
+    DEFAULT_DATA_ROOT,
     MMEarthDynamicWorldSegmentationDataModule,
     MMEarthDynamicWorldSegmentationDataset,
     find_one
@@ -44,6 +42,7 @@ from evaluation.metrics import (
     compute_fairness_summary,
     compute_gini,
 )
+from fairrsfm.biomes.taxonomy import get_macro_group
 
 # Backbone import
 UPSTREAM_SATMAE = ROOT_DIR / "models/upstream/SatMAE"
@@ -54,7 +53,7 @@ import models_vit_group_channels
 
 SATMAE_S2_BANDS = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12"]
 NUM_CLASSES  = 9
-IGNORE_INDEX = 0
+IGNORE_INDEX = -1
 
 BIOME_MACRO_GROUPS = {
     1:  "high biomass",
@@ -194,7 +193,7 @@ def build_and_load_model(ckpt_path: Path, backbone_weights: Path, device: torch.
         bb_state = bb_ckpt.get("model", bb_ckpt.get("state_dict", bb_ckpt))
         model.backbone.load_state_dict(bb_state, strict=False)
 
-    model.load_state_dict(cleaned, strict=False)
+    load_finetuned_state(model, cleaned)
     model.to(device)
     model.eval()
     return model
@@ -203,18 +202,6 @@ def build_and_load_model(ckpt_path: Path, backbone_weights: Path, device: torch.
 def evaluate(model, test_loader, tile_info_dict, test_dataset, device, num_classes=9):
     biome_data = defaultdict(lambda: {"true": [], "pred": [], "probs_max": [], "sample_ids": []})
     all_true, all_pred, all_pmax = [], [], []
-
-    # Map sample index to tile_id
-    raw_ds = getattr(test_dataset, "dataset", test_dataset)
-    h5 = raw_ds._file()
-    metadata = h5["metadata"][:]
-    indices = raw_ds.indices
-
-    sample_id_to_biome = {}
-    for idx in indices:
-        tile_id = metadata[idx]["tile_id"].decode("utf-8")
-        filename = metadata[idx]["filename"].decode("utf-8")
-        sample_id_to_biome[filename] = get_macro_biome(tile_info_dict, tile_id)
 
     with torch.no_grad():
         for x, y, sample_ids in test_loader:
@@ -226,7 +213,8 @@ def evaluate(model, test_loader, tile_info_dict, test_dataset, device, num_class
             preds = logits.argmax(dim=1).cpu().numpy()
 
             for i, sid in enumerate(sample_ids):
-                group = sample_id_to_biome.get(str(sid), "Unknown")
+                info = tile_info_dict.get(str(sid), {})
+                group = get_macro_group(int(info["biome"]) + 1) if "biome" in info else "Unknown"
                 if group != "Unknown":
                     biome_data[group]["true"].append(labels[i].reshape(-1))
                     biome_data[group]["pred"].append(preds[i].reshape(-1))
@@ -299,8 +287,8 @@ def evaluate(model, test_loader, tile_info_dict, test_dataset, device, num_class
 def main():
     parser = argparse.ArgumentParser(description="Evaluate SatMAE MMEarth Checkpoint")
     parser.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint .ckpt file")
-    parser.add_argument("--backbone_ckpt", type=str, default=str(ROOT_DIR / "checkpoints/satmae/pretrain-vit-base-e199.pth"))
-    parser.add_argument("--data_root", type=str, default=str(ROOT_DIR / "methods/prithvi/segmentation/mmearth_20k/hardcoded"))
+    parser.add_argument("--backbone_ckpt", type=str, default=str(ROOT_DIR.parents[1] / "checkpoints/satmae/pretrain-vit-base-e199.pth"))
+    parser.add_argument("--data_dir", "--data_root", dest="data_root", type=str, default=DEFAULT_DATA_ROOT)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--gpu", type=str, default="0")
     parser.add_argument("--out_json", type=str, default=None, help="Output JSON path")
@@ -315,7 +303,7 @@ def main():
         data_root=data_root,
         batch_size=args.batch_size,
         num_workers=4,
-        bands=SATMAE_S2_BANDS,
+        sentinel2_bands=SATMAE_S2_BANDS,
         image_size=96,
     )
     dm.setup("test")
@@ -341,7 +329,7 @@ def main():
     out_path = Path(args.out_json) if args.out_json else Path(args.ckpt).parent / "test_results.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as f:
-        json.dump(results, f, indent=2)
+        json.dump(json_safe(results), f, indent=2, allow_nan=False)
     print(f"Results saved to: {out_path}\n")
 
 

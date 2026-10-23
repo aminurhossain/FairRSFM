@@ -104,6 +104,8 @@ while ROOT_DIR.parent != ROOT_DIR:
         break
     ROOT_DIR = ROOT_DIR.parent
 BASE_DIR = ROOT_DIR
+sys.path.insert(0, str(BASE_DIR / "src"))
+from fairrsfm.evaluation.metrics import single_label_group_diagnostics
 
 DATA_DIR = BASE_DIR / "Geobench"
 if not DATA_DIR.exists() and os.environ.get("GEO_BENCH_DIR"):
@@ -503,6 +505,10 @@ class ClassifLinearProbe(L.LightningModule):
             keys_to_remove = [k for k in list(state_dict.keys()) if k.startswith("model.encoder.")]
             for k in keys_to_remove:
                 del state_dict[k]
+        if self.projector is not None:
+            checkpoint["bolp_biome_index"] = self.projector.biome_index
+            checkpoint["bolp_skip_residualization"] = self.projector.skip_residualization
+            checkpoint["bolp_k"] = self.projector.k
 
     def on_load_checkpoint(self, checkpoint):
         if FREEZE_BACKBONE:
@@ -600,7 +606,10 @@ class GlobalMacroF1Logger(Callback):
             return
         y_true    = np.concatenate(pl_module._gf1_labels)
         y_pred    = np.concatenate(pl_module._gf1_preds)
-        global_f1 = float(f1_score(y_true, y_pred, average="macro", zero_division=0))
+        present_classes = [c for c in range(self.num_classes) if (y_true == c).any()]
+        global_f1 = float(f1_score(
+            y_true, y_pred, labels=present_classes, average="macro", zero_division=0
+        ))
         global_micro_f1 = float(f1_score(y_true, y_pred, average="micro", zero_division=0))
         global_micro_acc = float((y_pred == y_true).mean())
         pl_module.log("val/macro_f1", global_f1, prog_bar=False, add_dataloader_idx=False)
@@ -784,6 +793,26 @@ class BiomeMacroF1Logger(Callback):
         print(f"  {'Demographic Parity Disparity':<44}  {dpm_disp if not np.isnan(dpm_disp) else float('nan'):.4f}")
         print(f"{'═'*82}\n")
 
+        group_diagnostics = single_label_group_diagnostics(
+            {g: (np.asarray(d["true"]), np.asarray(d["pred"]))
+             for g, d in biome_data.items() if len(d["true"])},
+            self.num_classes,
+        )
+        for group, diagnostics in group_diagnostics.items():
+            print(
+                f"  [Class support] {group}: n={diagnostics['sample_count']}, "
+                f"GT classes={diagnostics['ground_truth_class_count']}, "
+                f"low_support={diagnostics['low_support']}, "
+                f"F1(GT)={diagnostics['macro_f1_gt_present']:.4f}, "
+                f"F1(union)={diagnostics['macro_f1_union']:.4f}"
+            )
+            for cls in diagnostics["per_class"]:
+                if cls["true_count"] or cls["predicted_count"]:
+                    print(
+                        f"    class {cls['class_id']}: true={cls['true_count']} "
+                        f"pred={cls['predicted_count']} F1={cls['f1']:.4f}"
+                    )
+
         payload = {
             "epoch": epoch,
             "overall_macro_f1": overall_f1,
@@ -803,7 +832,7 @@ class BiomeMacroF1Logger(Callback):
             "equalized_odds_disparity": eqodds_disp,
             "demographic_parity_disparity": dpm_disp,
             "per_group_metrics": {
-                g: {"macro_f1": group_f1s[g], "micro_f1": group_micro_f1s[g], "mAP": group_maps[g], "accuracy": group_accs[g], "ece": group_eces[g], "sample_count": group_counts[g]}
+                g: {"macro_f1": group_f1s[g], "micro_f1": group_micro_f1s[g], "mAP": group_maps[g], "accuracy": group_accs[g], "ece": group_eces[g], "sample_count": group_counts[g], "diagnostics": group_diagnostics[g]}
                 for g in group_f1s
             }
         }
@@ -910,6 +939,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=EPOCHS, help="Number of training epochs (default: %(default)s)")
     parser.add_argument("--seed", type=int, default=SEED, help="Random seed (default: 42)")
     parser.add_argument("--gpu", type=str, default="0", help="CUDA GPU device ID (default: 0)")
+    parser.add_argument("--out-dir", type=str, default=None, help="Custom output directory")
     parser.add_argument("--resume-from", type=str, default=None, help="Path to checkpoint to resume training from")
     parser.add_argument("--skip-resid", action="store_true", help="Skip residualization step for ablation studies")
     args = parser.parse_args()
@@ -922,7 +952,7 @@ def main():
 
     resid_tag = "no_resid" if args.skip_resid else "full"
     mode_str  = f"eurosat_lp_bolp_{resid_tag}"
-    OUT_DIR   = BASE_DIR / f"runs/{mode_str}/seed_{seed}"
+    OUT_DIR   = Path(args.out_dir) if args.out_dir else BASE_DIR / f"runs/{mode_str}/seed_{seed}"
     CKPT_DIR  = OUT_DIR  / "checkpoints"
 
     for p in [DATA_DIR, BIOME_JSON, WEIGHTS_PT]:
@@ -1042,7 +1072,7 @@ def main():
     )
     progress_bar_cb = CleanProgressBar(refresh_rate=20)
 
-    tb_logger = TensorBoardLogger(save_dir=BASE_DIR / "runs", name=mode_str, version=0)
+    tb_logger = TensorBoardLogger(save_dir=OUT_DIR / "tb_logs", name=mode_str, version=0)
 
     trainer = L.Trainer(
         accelerator             = "gpu",

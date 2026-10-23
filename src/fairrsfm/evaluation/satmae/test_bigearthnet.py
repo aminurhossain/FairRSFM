@@ -24,17 +24,25 @@ from sklearn.metrics import accuracy_score, f1_score
 ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
+from evaluation.checkpoint import load_finetuned_state
+from evaluation.serialization import json_safe
+from evaluation.proj import ensure_proj_data
+ensure_proj_data()
 
 import geobench
 import geobench.task
 
 from evaluation.metrics import (
     compute_subgroup_macro_f1_multilabel,
+    compute_per_class_f1_multilabel,
     compute_ece_multilabel,
     compute_map_multilabel,
+    compute_equalized_odds_multilabel,
+    compute_demographic_parity_multilabel,
     compute_fairness_summary,
     compute_gini,
 )
+from evaluation.thresholds import load_validation_thresholds, resolve_checkpoint_epoch
 
 # Backbone import
 UPSTREAM_SATMAE = ROOT_DIR / "models/upstream/SatMAE"
@@ -204,7 +212,7 @@ def build_and_load_model(ckpt_path: Path, backbone_weights: Path, device: torch.
         bb_state = bb_ckpt.get("model", bb_ckpt.get("state_dict", bb_ckpt))
         model.backbone.load_state_dict(bb_state, strict=False)
 
-    model.load_state_dict(cleaned, strict=False)
+    load_finetuned_state(model, cleaned)
     model.to(device)
     model.eval()
     return model
@@ -235,10 +243,11 @@ def evaluate(model, test_loader, biome_map, device, num_classes=43, threshold=0.
     all_probs = np.array(all_probs)
     all_pred  = (all_probs >= threshold).astype(int)
 
-    global_macro_f1 = float(f1_score(all_true, all_pred, average="macro", zero_division=0))
+    global_macro_f1 = compute_subgroup_macro_f1_multilabel(all_true, all_pred, num_classes)
     global_micro_f1 = float(f1_score(all_true, all_pred, average="micro", zero_division=0))
     global_acc      = float(accuracy_score(all_true, all_pred))
     global_map      = compute_map_multilabel(all_true, all_probs, num_classes)
+    global_ece      = compute_ece_multilabel(all_true, all_probs)
 
     biome_macro_f1, biome_eces, biome_counts = {}, {}, {}
     per_group_metrics = {}
@@ -255,6 +264,7 @@ def evaluate(model, test_loader, biome_map, device, num_classes=43, threshold=0.
         b_map   = compute_map_multilabel(yt, pr, num_classes)
         b_ece   = compute_ece_multilabel(yt, pr, yp)
         b_count = len(yt)
+        biome_data[b]["pred"] = yp
 
         biome_macro_f1[b] = b_macro
         biome_eces[b]     = b_ece
@@ -272,12 +282,16 @@ def evaluate(model, test_loader, biome_map, device, num_classes=43, threshold=0.
     fairness = compute_fairness_summary(biome_macro_f1, global_macro_f1)
     ece_vals = [v for v in biome_eces.values() if not np.isnan(v)]
     ece_disp = (max(ece_vals) - min(ece_vals)) if ece_vals else float("nan")
+    equalized_odds = compute_equalized_odds_multilabel(biome_data, num_classes)
+    demographic_parity = compute_demographic_parity_multilabel(biome_data, num_classes)
+    per_class_f1 = compute_per_class_f1_multilabel(all_true, all_pred, num_classes).tolist()
 
     results = {
         "global_macro_f1": global_macro_f1,
         "global_micro_f1": global_micro_f1,
         "global_accuracy": global_acc,
         "global_map": global_map,
+        "global_ece": global_ece,
         "worst_case_macro_f1": fairness["worst_case"],
         "best_case_macro_f1": fairness["best_case"],
         "group_mean_macro_f1": fairness["mean"],
@@ -286,6 +300,9 @@ def evaluate(model, test_loader, biome_map, device, num_classes=43, threshold=0.
         "normalized_fairness_range": fairness["nfr"],
         "gini_coefficient": fairness["gini"],
         "ece_disparity": ece_disp,
+        "equalized_odds_disparity": equalized_odds,
+        "demographic_parity_disparity": demographic_parity,
+        "per_class_f1": per_class_f1,
         "per_biome_macro_f1": biome_macro_f1,
         "per_biome_ece": biome_eces,
         "per_biome_counts": biome_counts,
@@ -297,20 +314,21 @@ def evaluate(model, test_loader, biome_map, device, num_classes=43, threshold=0.
 def main():
     parser = argparse.ArgumentParser(description="Evaluate SatMAE BigEarthNet Checkpoint")
     parser.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint .ckpt file")
-    parser.add_argument("--backbone_ckpt", type=str, default=str(ROOT_DIR / "checkpoints/satmae/pretrain-vit-base-e199.pth"))
+    parser.add_argument("--backbone_ckpt", type=str, default=str(ROOT_DIR.parents[1] / "checkpoints/satmae/pretrain-vit-base-e199.pth"))
     parser.add_argument("--data_dir", type=str, default=None, help="Path to GeoBench data root")
-    parser.add_argument("--biome_json", type=str, default=str(ROOT_DIR / "configs/bigearthnet_biome_mapping.json"))
+    parser.add_argument("--biome_json", type=str, default=str(ROOT_DIR.parents[1] / "experiments/configs/data_mappings/bigearthnet_biome_mapping.json"))
     parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--thresholds-json", required=True, help="Validation-selected 43-class threshold vector or val_results.json")
+    parser.add_argument("--thresholds-epoch", type=int, default=None, help="Epoch of the selected checkpoint")
     parser.add_argument("--gpu", type=str, default="0")
     parser.add_argument("--out_json", type=str, default=None, help="Output JSON path")
     args = parser.parse_args()
 
     device = torch.device(f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu")
 
-    data_dir = Path(args.data_dir) if args.data_dir else (ROOT_DIR / "configs/geobench")
+    data_dir = Path(args.data_dir) if args.data_dir else Path(os.environ.get("GEO_BENCH_DIR", "/data1/aminur/dataset/geobench"))
     if not data_dir.exists():
-        data_dir = ROOT_DIR / "Geobench"
+        raise FileNotFoundError(f"GeoBench data directory not found: {data_dir}")
     benchmark_dir = data_dir / "classification_v1.0"
 
     tasks = list(geobench.task_iterator(benchmark_name="classification_v1.0", benchmark_dir=str(benchmark_dir)))
@@ -325,7 +343,11 @@ def main():
     model = build_and_load_model(Path(args.ckpt), Path(args.backbone_ckpt), device)
 
     print("\nRunning evaluation on BigEarthNet test split...")
-    results = evaluate(model, test_loader, biome_map, device, num_classes=NUM_CLASSES, threshold=args.threshold)
+    threshold_epoch = resolve_checkpoint_epoch(args.ckpt, args.thresholds_epoch)
+    thresholds = load_validation_thresholds(args.thresholds_json, NUM_CLASSES, threshold_epoch)
+    results = evaluate(model, test_loader, biome_map, device, num_classes=NUM_CLASSES, threshold=thresholds)
+    results["optimal_thresholds"] = thresholds.tolist()
+    results["threshold_epoch"] = threshold_epoch
 
     print("\n" + "=" * 60)
     print("BigEarthNet Test Evaluation Results")
@@ -342,7 +364,7 @@ def main():
     out_path = Path(args.out_json) if args.out_json else Path(args.ckpt).parent / "test_results.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as f:
-        json.dump(results, f, indent=2)
+        json.dump(json_safe(results), f, indent=2, allow_nan=False)
     print(f"Results saved to: {out_path}\n")
 
 

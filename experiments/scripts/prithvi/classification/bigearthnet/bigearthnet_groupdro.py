@@ -117,6 +117,8 @@ while ROOT_DIR.parent != ROOT_DIR:
         break
     ROOT_DIR = ROOT_DIR.parent
 BASE_DIR = ROOT_DIR
+sys.path.insert(0, str(ROOT_DIR / "src"))
+from fairrsfm.evaluation.metrics import compute_ece_multilabel
 
 DATA_DIR = BASE_DIR / "Geobench"
 if not DATA_DIR.exists() and os.environ.get("GEO_BENCH_DIR"):
@@ -333,24 +335,6 @@ def compute_map(y_true: np.ndarray, probs: np.ndarray, num_classes: int) -> floa
     return float(np.mean(aps))
 
 
-def compute_multilabel_ece(y_true: np.ndarray, probs: np.ndarray, num_classes: int, n_bins: int = 10) -> float:
-    present = [c for c in range(num_classes) if y_true[:, c].sum() > 0]
-    if not present:
-        return float("nan")
-    eces = []
-    for c in present:
-        p_c = probs[:, c]
-        y_c = y_true[:, c]
-        ece_c, n = 0.0, len(y_c)
-        for lo, hi in zip(np.linspace(0, 1, n_bins + 1)[:-1], np.linspace(0, 1, n_bins + 1)[1:]):
-            mask = (p_c >= lo) & (p_c < hi)
-            if mask.sum() == 0:
-                continue
-            acc_bin  = y_c[mask].mean()
-            conf_bin = p_c[mask].mean()
-            ece_c += (mask.sum() / n) * abs(acc_bin - conf_bin)
-        eces.append(ece_c)
-    return float(np.mean(eces)) if eces else float("nan")
 
 
 def compute_gini(values: list) -> float:
@@ -614,7 +598,7 @@ class BiomeMetricsLogger(Callback):
         overall_f1_05  = compute_macro_f1_multilabel(all_yt, all_yp_05, self.num_classes)
         overall_map    = compute_map(all_yt, all_pr, self.num_classes)
         overall_acc    = float(accuracy_score(all_yt, all_yp))
-        overall_ece    = compute_multilabel_ece(all_yt, all_pr, self.num_classes)
+        overall_ece    = compute_ece_multilabel(all_yt, all_pr)
 
         known_biome_data = {b: d for b, d in biome_data.items() if b != "Unknown"}
 
@@ -652,7 +636,7 @@ class BiomeMetricsLogger(Callback):
             f1_05  = compute_macro_f1_multilabel(y_true, preds_05, self.num_classes)
             map_g  = compute_map(y_true, probs, self.num_classes)
             acc_g  = float(accuracy_score(y_true, preds))
-            ece_g  = compute_multilabel_ece(y_true, probs, self.num_classes)
+            ece_g  = compute_ece_multilabel(y_true, probs)
 
             group_f1_opts[group] = f1_opt
             group_f1_05s[group]  = f1_05
@@ -738,6 +722,7 @@ class BiomeMetricsLogger(Callback):
 
         record = {
             "epoch": epoch,
+            "optimal_thresholds": opt_th.tolist(),
             "overall_macro_f1_opt": overall_f1_opt,
             "overall_macro_f1_05": overall_f1_05,
             "overall_map": overall_map,

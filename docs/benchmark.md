@@ -102,7 +102,7 @@ Single-label classification is evaluated with macro-F1 over the classes present 
 
 ### m-BigEarthNet
 
-Multi-label classification uses macro-F1 at class-specific optimal thresholds (`F1@opt`). Thresholds are selected on validation data over `[0.1, 0.95]` and then fixed for test evaluation.
+Multi-label classification uses macro-F1 at class-specific optimal thresholds (`F1@opt`). Thresholds are selected on validation data from `0.10, 0.15, ..., 0.90` and then fixed for test evaluation.
 
 ### m-SA-Crop-Type and MMEarth20K
 

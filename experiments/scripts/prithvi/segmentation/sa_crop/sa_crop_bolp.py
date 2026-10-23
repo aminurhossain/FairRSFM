@@ -1083,119 +1083,6 @@ class BiomeMIoULogger(Callback):
         pl_module._biome_orig = None
 
 
-class SaveBestOnlyCheckpoint(Callback):
-    """
-    Saves a checkpoint whenever test global_miou OR worst_biome_miou improves.
-    Checkpointing is intentionally driven by test metrics (for paper results).
-    Val is still evaluated every epoch via EarlyStopping and BiomeMIoULogger.
-    """
-    def __init__(self, test_loader, biome_map, out_dir, device, mode_str):
-        super().__init__()
-        self.best_global_miou = float("-inf")
-        self.best_worst_miou  = float("-inf")
-        self.test_loader      = test_loader
-        self.biome_map        = biome_map
-        self.out_dir          = Path(out_dir)
-        self.device_val       = device
-        self.mode_str         = mode_str
-        self.best_model_path  = None
-        self.best_model_score = None
-
-    def on_validation_epoch_end(self, trainer, pl_module):
-        if trainer.sanity_checking:
-            return
-
-        test_results = evaluate_test_split(pl_module, self.test_loader,
-                                           self.biome_map, self.device_val)
-        if test_results is None:
-            return
-
-        global_miou = float(test_results.get("global_miou", float("nan")))
-        worst_miou  = float(test_results.get("worst_biome_miou", float("nan")))
-
-        is_better_global = not np.isnan(global_miou) and global_miou > self.best_global_miou
-        is_better_worst  = not np.isnan(worst_miou)  and worst_miou  > self.best_worst_miou
-
-        if is_better_global:
-            self.best_global_miou = global_miou
-        if is_better_worst:
-            self.best_worst_miou = worst_miou
-
-        if is_better_global or is_better_worst:
-            epoch   = trainer.current_epoch
-            reasons = []
-            if is_better_global:
-                reasons.append("globalMIoU")
-            if is_better_worst:
-                reasons.append("worstMIoU")
-            reason_str    = "_".join(reasons)
-            ckpt_filename = f"{self.mode_str}-epoch={epoch:02d}-{reason_str}.ckpt"
-            ckpt_path     = self.out_dir / ckpt_filename
-
-            trainer.save_checkpoint(str(ckpt_path))
-            print(f"[Checkpoint] Saved {ckpt_path}  (reason: {reason_str})")
-
-            if is_better_global:
-                self.best_model_path  = str(ckpt_path)
-                self.best_model_score = torch.tensor(global_miou)
-
-
-class EpochMetricsSaver(Callback):
-    """
-    Writes a single test_metrics.json with one entry per epoch containing
-    both val and test metrics. This is the single source of truth.
-    """
-    def __init__(self, test_loader, biome_map, out_dir, device):
-        super().__init__()
-        self.test_loader = test_loader
-        self.biome_map   = biome_map
-        self.out_dir     = Path(out_dir)
-        self.device      = device
-
-    def on_validation_epoch_end(self, trainer, pl_module):
-        if trainer.sanity_checking:
-            return
-        epoch = trainer.current_epoch
-
-        # ── test metrics ──
-        test_results = evaluate_test_split(
-            pl_module, self.test_loader, self.biome_map, self.device
-        )
-        if test_results is None:
-            return
-
-        # ── val metrics from already-accumulated biome data ──
-        val_biome_data = getattr(pl_module, "_val_biome_orig", None)
-        val_results = None
-        if val_biome_data is not None:
-            val_results = compute_metrics_from_biome_data(
-                val_biome_data, pl_module.num_classes, pl_module.ignore_index
-            )
-
-        json_path = self.out_dir / "test_metrics.json"
-        history   = {}
-        if json_path.exists():
-            try:
-                with open(json_path, "r") as f:
-                    history = json.load(f)
-            except Exception as e:
-                print(f"[EpochMetrics] Warning: could not load existing file: {e}")
-
-        history[f"epoch_{epoch}"] = {
-            "epoch":            epoch,
-            "val_global_miou":  val_results.get("global_miou")      if val_results else None,
-            "val_worst_miou":   val_results.get("worst_biome_miou")  if val_results else None,
-            "test_global_miou": test_results.get("global_miou"),
-            "test_worst_miou":  test_results.get("worst_biome_miou"),
-            "val_full":         val_results,
-            "test_full":        test_results,
-        }
-
-        with open(json_path, "w") as f:
-            json.dump(history, f, indent=2)
-        print(f"[EpochMetrics] Saved epoch_{epoch} → {json_path}")
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # 8. HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1294,6 +1181,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=EPOCHS, help="Number of training epochs (default: %(default)s)")
     parser.add_argument("--seed", type=int, default=SEED, help="Random seed (default: 42)")
     parser.add_argument("--gpu", type=str, default="0", help="CUDA GPU device ID (default: 0)")
+    parser.add_argument("--out-dir", type=str, default=None, help="Custom output directory")
     parser.add_argument("--resume-from", type=str, default=None, help="Path to checkpoint to resume training from")
     args = parser.parse_args()
 
@@ -1305,7 +1193,7 @@ def main():
 
     resid_tag = "no_resid" if BOLP_SKIP_RESIDUALIZATION else "full"
     mode_str  = f"sa_crop_{'lp' if FREEZE_BACKBONE else 'ft'}_bolp_k{BOLP_K}_{resid_tag}"
-    OUT_DIR   = BASE_DIR / f"runs/{mode_str}/seed_{seed}"
+    OUT_DIR   = Path(args.out_dir) if args.out_dir else BASE_DIR / f"runs/{mode_str}/seed_{seed}"
     CKPT_DIR  = OUT_DIR  / "checkpoints"
 
     for p in [DATA_DIR, BIOME_JSON, WEIGHTS_PT]:
@@ -1449,11 +1337,11 @@ def main():
         class_names           = CLASS_NAMES,
         output_dir            = OUT_DIR,
         ignore_index          = IGNORE_INDEX,
-        test_loader           = test_loader,
+        test_loader           = None,
     )
 
     tb_logger = TensorBoardLogger(
-        save_dir = BASE_DIR / "runs",
+        save_dir = OUT_DIR / "tb_logs",
         name     = mode_str,
         version  = 0,
     )
@@ -1490,13 +1378,17 @@ def main():
         print(f"[Done] Best Worst-Case Score      : {ckpt_worst_cb.best_model_score:.4f}")
 
     # ── Test Evaluation on Best Macro mIoU Checkpoint ──
+    # Lightning restores callback state during test; retain both fitted paths.
+    selected_macro_path = ckpt_macro_cb.best_model_path
+    selected_worst_path = ckpt_worst_cb.best_model_path
     print("\n[Test] Running evaluation on Best Macro mIoU Checkpoint...")
-    trainer.test(lp_model, test_loader, ckpt_path=ckpt_macro_cb.best_model_path)
-
-    # ── Test Evaluation on Best Worst-Case mIoU Checkpoint ──
-    if ckpt_worst_cb.best_model_path:
-        print("\n[Test] Running evaluation on Best Worst-Case Biome mIoU Checkpoint...")
-        trainer.test(lp_model, test_loader, ckpt_path=ckpt_worst_cb.best_model_path)
+    trainer.test(lp_model, test_loader, ckpt_path=selected_macro_path)
+    selected_test_metrics = evaluate_test_split(lp_model, test_loader, biome_map, device)
+    (OUT_DIR / "test_selected.json").write_text(json.dumps({
+        "checkpoint": selected_macro_path,
+        "selection": "best validation macro mIoU",
+        "metrics": selected_test_metrics,
+    }, indent=2))
 
     # ── Save trainable weights (decoder + head only) ──
     ckpt_path = CKPT_DIR / f"{mode_str}_weights.pt"
@@ -1511,6 +1403,10 @@ def main():
         "freeze_backbone": True,
     }, ckpt_path)
     print(f"[Done] Trainable weights saved: {ckpt_path}")
+    # Export above belongs to the primary, validation-selected checkpoint.
+    if selected_worst_path:
+        print("\n[Test] Running evaluation on Best Worst-Case Biome mIoU Checkpoint...")
+        trainer.test(lp_model, test_loader, ckpt_path=selected_worst_path)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

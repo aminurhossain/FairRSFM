@@ -166,13 +166,17 @@ Unknown, water-only, or unmatched samples are reported separately and excluded f
 | [Benchmark protocol](docs/benchmark.md) | Datasets, sample counts, metadata, backbones, heads, and optimization |
 | [Biome taxonomy](docs/biome-groups.md) | 14 raw biomes, six macro-groups, rationales, labeling, and distributions |
 | [Methods and metrics](docs/methods.md) | DBR, BOLP, GroupDRO, task metrics, robustness, calibration, and parity |
+| [Metric definitions](docs/metric-definitions.md) | Mathematical definitions and the protocol for new runs |
+| [Cleanup status](docs/cleanup-status.md) | Verified fixes and work required before paper-grade reruns |
 | [Complete results](docs/results.md) | All Prithvi, SatMAE, DOFA, and biome-wise results from the paper |
 
 ## Code and Release Status
 
-The repository now provides the public package and experiment layout. The
-implementation and reproducible configurations are being prepared for release;
-the current tree does not claim executable training code.
+The repository contains standalone training scripts for the model-dataset-method
+combinations, a dispatching `train.py`, and checkpoint evaluators under
+`src/fairrsfm/evaluation/`. This code is in cleanup. The historical paper
+tables have not been reproduced under the unified metric protocol; see
+[cleanup status](docs/cleanup-status.md) before using them for new comparisons.
 
 | Component | Status | Planned location |
 |---|---|---|
@@ -180,8 +184,8 @@ the current tree does not claim executable training code.
 | Paper | Coming soon | [arXiv placeholder](https://arxiv.org/abs/XXXX.XXXXX) |
 | Benchmark metadata and dataset | Coming soon | [Hugging Face placeholder](https://huggingface.co/datasets/aminurhossain/FairRSFM) |
 | Preprocessing and biome-labeling code | In preparation | [`src/fairrsfm/`](src/fairrsfm/) |
-| Training and mitigation code | In preparation | [`src/fairrsfm/`](src/fairrsfm/) |
-| Evaluation scripts and configs | In preparation | [`experiments/`](experiments/) |
+| Training and mitigation code | Present; consolidation pending | [`experiments/scripts/`](experiments/scripts/) |
+| Evaluation scripts and configs | Present; checkpoint validation pending | [`src/fairrsfm/evaluation/`](src/fairrsfm/evaluation/) |
 | License | To be confirmed before code and data release | This repository |
 
 ## Repository Structure
@@ -199,15 +203,20 @@ FairRSFM/
 |   |-- benchmark.md
 |   |-- biome-groups.md
 |   |-- methods.md
+|   |-- metric-definitions.md
+|   |-- cleanup-status.md
 |   `-- results.md
 |-- experiments/
 |   |-- README.md
+|   |-- train.py
 |   |-- configs/
 |   |   |-- backbones/
+|   |   |-- data_mappings/
 |   |   |-- datasets/
-|   |   |-- methods/
-|   |   `-- tasks/
-|   `-- outputs/
+|   |   `-- methods/
+|   |-- scripts/
+|   `-- run_prithvi_matrix.py
+|-- tests/
 `-- src/
     |-- README.md
     `-- fairrsfm/

@@ -23,11 +23,14 @@ from torch.utils.data import DataLoader
 ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
+from evaluation.checkpoint import load_finetuned_state
+from evaluation.serialization import json_safe
 
 try:
     import pyproj
-    os.environ.setdefault("PROJ_DATA", pyproj.datadir.get_data_dir())
-    os.environ.setdefault("PROJ_LIB", pyproj.datadir.get_data_dir())
+    if not (Path(os.environ.get("PROJ_DATA", "")) / "proj.db").is_file():
+        os.environ["PROJ_DATA"] = pyproj.datadir.get_data_dir()
+        os.environ["PROJ_LIB"] = pyproj.datadir.get_data_dir()
 except Exception:
     pass
 
@@ -35,23 +38,26 @@ from terratorch.models import PrithviModelFactory
 from terratorch.models.backbones.prithvi_vit import HLSBands
 from terratorch.models.backbones import prithvi_vit
 
-from methods.prithvi.segmentation.mmearth_20k.mmearth_dynamic_world_datamodule import (
-    MMEarthDynamicWorldDataModule,
-    DW_CLASS_NAMES,
-    PRITHVI_DW_BAND_INDICES,
+from fairrsfm.data.mmearth import (
+    MMEarthDynamicWorldSegmentationDataModule,
+    DYNAMIC_WORLD_CLASSES,
+    DEFAULT_DATA_ROOT,
+    find_one,
 )
 from evaluation.metrics import (
     compute_miou,
     compute_macro_f1_seg,
     compute_fairness_summary,
 )
+from fairrsfm.biomes.taxonomy import get_macro_group
 
 BANDS = [
     HLSBands.BLUE, HLSBands.GREEN, HLSBands.RED,
     HLSBands.NIR_NARROW, HLSBands.SWIR_1, HLSBands.SWIR_2,
 ]
-NUM_CLASSES  = len(DW_CLASS_NAMES)
-IGNORE_INDEX = 255
+NUM_CLASSES  = len(DYNAMIC_WORLD_CLASSES)
+IGNORE_INDEX = -1
+MMEARTH_S2_BANDS = ["B2", "B3", "B4", "B8A", "B11", "B12"]
 
 
 class MMEarthDatasetWrapper(torch.utils.data.Dataset):
@@ -156,7 +162,7 @@ def build_and_load_model(ckpt_path: Path, backbone_weights: Path, device: torch.
         print("[Model Type] Detected Standard Head (ERM / GroupDRO / DBR)")
 
     model_sd = {k.replace("model.", "", 1): v for k, v in sd.items() if k.startswith("model.")}
-    base_model.load_state_dict(model_sd, strict=False)
+    load_finetuned_state(base_model, model_sd)
     base_model.to(device)
     base_model.eval()
 
@@ -174,7 +180,7 @@ def evaluate(base_model, test_loader, tile_info_dict, test_ds, device, num_class
             biome_ids = []
             for sid in sample_ids:
                 info = tile_info_dict.get(sid, {})
-                biome_ids.append(info.get("biome_desc", info.get("biome", "Unknown")))
+                biome_ids.append(get_macro_group(int(info["biome"]) + 1) if "biome" in info else "Unknown")
             base_model._current_biome_ids = biome_ids
 
             out = base_model(x)
@@ -207,6 +213,7 @@ def evaluate(base_model, test_loader, tile_info_dict, test_ds, device, num_class
             continue
         b_miou = compute_miou(yt, yp, num_classes, ignore_index=IGNORE_INDEX)
         b_f1   = compute_macro_f1_seg(yt, yp, num_classes, ignore_index=IGNORE_INDEX)
+        active_classes = [c for c in range(num_classes) if np.any(yt == c)]
 
         biome_mious[b]  = b_miou
         biome_f1s[b]    = b_f1
@@ -215,6 +222,8 @@ def evaluate(base_model, test_loader, tile_info_dict, test_ds, device, num_class
             "miou": b_miou,
             "macro_f1": b_f1,
             "tile_count": len(biome_data[b]["true"]),
+            "active_class_ids": active_classes,
+            "active_class_count": len(active_classes),
         }
 
     fairness = compute_fairness_summary(biome_mious)
@@ -225,9 +234,9 @@ def evaluate(base_model, test_loader, tile_info_dict, test_ds, device, num_class
         "worst_case_miou": fairness["worst_case"],
         "best_case_miou": fairness["best_case"],
         "miou_disparity": fairness["disparity"],
-        "performance_equity_ratio": fairness["performance_equity_ratio"],
-        "gini_coefficient": fairness["gini_coefficient"],
-        "normalized_fairness_range": fairness["normalized_fairness_range"],
+        "performance_equity_ratio": fairness["per"],
+        "gini_coefficient": fairness["gini"],
+        "normalized_fairness_range": fairness["nfr"],
         "per_biome_miou": biome_mious,
         "per_biome_f1": biome_f1s,
         "per_group_metrics": per_group_metrics,
@@ -238,8 +247,8 @@ def evaluate(base_model, test_loader, tile_info_dict, test_ds, device, num_class
 def main():
     parser = argparse.ArgumentParser(description="Evaluate Prithvi MMEarth Checkpoint")
     parser.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint .ckpt file")
-    parser.add_argument("--backbone_ckpt", type=str, default=str(ROOT_DIR / "models/Prithvi_EO_V2_300M_TL.pt"))
-    parser.add_argument("--data_dir", type=str, default="/data1/aminur/dataset/mmearth", help="Path to MMEarth data root")
+    parser.add_argument("--backbone_ckpt", type=str, default=str(ROOT_DIR.parents[1] / "checkpoints/Prithvi_EO_V2_300M_TL.pt"))
+    parser.add_argument("--data_dir", type=str, default=DEFAULT_DATA_ROOT, help="Path to MMEarth data root")
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--gpu", type=str, default="0")
     parser.add_argument("--out_json", type=str, default=None, help="Output JSON path")
@@ -249,17 +258,15 @@ def main():
     print(f"Device: {device}")
 
     data_root = Path(args.data_dir)
-    tile_info_path = data_root / "tile_info.json"
-    tile_info_dict = {}
-    if tile_info_path.exists():
-        with open(tile_info_path) as f:
-            tile_info_dict = json.load(f)
+    tile_info_path = find_one(data_root, "*tile_info.json")
+    with open(tile_info_path) as f:
+        tile_info_dict = json.load(f)
 
-    dm = MMEarthDynamicWorldDataModule(
+    dm = MMEarthDynamicWorldSegmentationDataModule(
         data_root=data_root,
         batch_size=args.batch_size,
         num_workers=4,
-        bands=PRITHVI_DW_BAND_INDICES,
+        sentinel2_bands=MMEARTH_S2_BANDS,
         image_size=112,
     )
     dm.setup("test")
@@ -284,7 +291,7 @@ def main():
     out_json = Path(args.out_json) if args.out_json else Path(args.ckpt).parent / "test_results.json"
     out_json.parent.mkdir(parents=True, exist_ok=True)
     with open(out_json, "w") as f:
-        json.dump(results, f, indent=2)
+        json.dump(json_safe(results), f, indent=2, allow_nan=False)
     print(f"\n[Saved] Test results saved to: {out_json}")
 
 

@@ -1,14 +1,11 @@
-"""
-Compatibility shim module for MMEarth Dynamic World DataModule.
-Forwards all symbols directly to fairrsfm.data.mmearth.
+"""Compatibility import for legacy training scripts.
+
+The maintained implementation lives in fairrsfm.mmearth_dynamic_world_datamodule.
 """
 
-from fairrsfm.data.mmearth import *
-from fairrsfm.data.mmearth import (
+from fairrsfm.mmearth_dynamic_world_datamodule import (  # noqa: F401
     DYNAMIC_WORLD_CLASSES,
-    DEFAULT_DATA_ROOT,
     MMEarthDynamicWorldSegmentationDataModule,
     MMEarthDynamicWorldSegmentationDataset,
     find_one,
-    validate_indices,
 )

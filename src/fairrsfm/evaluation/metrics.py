@@ -3,7 +3,8 @@ FairRSFM Benchmark Fairness & Performance Metric Utilities
 ===========================================================
 Unified, verified metric calculations across single-label classification (EuroSAT),
 multi-label classification (BigEarthNet), and semantic segmentation (SA-Crop, MMEarth).
-All formulations follow the DOFA reference implementation as the gold-standard ground truth.
+Task and group metrics are harmonized with the DOFA reference implementation;
+multi-label ECE uses a corrected per-label calibration definition.
 
 Key enhancements (WACV review remediation):
 - Strict sample standard deviation (ddof=1) across all summary and reporting functions.
@@ -93,7 +94,7 @@ def compute_fairness_summary(
     """
     Computes worst-case, best-case, group mean, std (sample std ddof=1 by default),
     disparity (Delta = best - worst), Performance Equity Ratio (PER = worst / best),
-    Normalized Fairness Range (NFR = Delta / global_score or Delta / group_mean),
+    Normalized Fairness Range (NFR = Delta / group_mean),
     and Gini coefficient.
     
     Guarantees: worst_case <= mean <= best_case.
@@ -117,11 +118,8 @@ def compute_fairness_summary(
     disp_val  = float(best_val - worst_val)
     per       = (worst_val / best_val) if (best_val > 0 and not np.isnan(worst_val)) else 0.0
 
-    # NFR normalized by global score if provided and positive, else by group mean
-    if global_score is not None and global_score > 0 and not np.isnan(global_score):
-        nfr = disp_val / global_score
-    else:
-        nfr = (disp_val / mean_val) if mean_val > 0 else float("nan")
+    # DOFA reference: normalize by the unweighted mean of active group scores.
+    nfr = (disp_val / mean_val) if mean_val > 0 else float("nan")
 
     gini = compute_gini(vals)
     return {
@@ -174,6 +172,65 @@ def compute_subgroup_macro_f1(
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         return float(f1_score(y_true, y_pred, labels=labels_eval, average="macro", zero_division=0))
+
+
+def single_label_group_diagnostics(
+    groups: Dict[str, Tuple[np.ndarray, np.ndarray]],
+    num_classes: int,
+    *,
+    bootstrap_replicates: int = 0,
+    seed: int = 42,
+    low_support_below: int = 30,
+) -> Dict[str, dict]:
+    """Class support and complementary F1 scores for image-level groups.
+
+    Bootstrap resamples images within each group. The primary F1 recalculates
+    its ground-truth class set in each resample; union and matched scores are
+    descriptive and never used for checkpoint selection.
+    """
+    rng = np.random.default_rng(seed)
+    present_sets = [set(np.unique(np.asarray(yt, dtype=int))) for yt, _ in groups.values() if len(yt)]
+    shared = sorted(int(c) for c in set.intersection(*present_sets)) if present_sets else []
+    result = {}
+    for group, (truth, pred) in groups.items():
+        truth = np.asarray(truth, dtype=int).ravel()
+        pred = np.asarray(pred, dtype=int).ravel()
+        if truth.shape != pred.shape:
+            raise ValueError(f"Mismatched truth and prediction shapes for {group}")
+        if np.any((truth < 0) | (truth >= num_classes) | (pred < 0) | (pred >= num_classes)):
+            raise ValueError(f"Class ID outside 0..{num_classes - 1} for {group}")
+        true_counts = np.bincount(truth, minlength=num_classes).tolist()
+        pred_counts = np.bincount(pred, minlength=num_classes).tolist()
+        gt_classes = [c for c, n in enumerate(true_counts) if n]
+        union = [c for c in range(num_classes) if true_counts[c] or pred_counts[c]]
+        score = lambda labels: float(f1_score(truth, pred, labels=labels, average="macro", zero_division=0)) if labels else float("nan")
+        row = {
+            "sample_count": len(truth),
+            "low_support": len(truth) < low_support_below,
+            "ground_truth_class_count": len(gt_classes),
+            "union_class_count": len(union),
+            "ground_truth_class_ids": gt_classes,
+            "union_class_ids": union,
+            "class_matched_ids": shared,
+            "macro_f1_gt_present": score(gt_classes),
+            "macro_f1_union": score(union),
+            "macro_f1_class_matched": score(shared),
+            "per_class": [
+                {"class_id": c, "true_count": true_counts[c], "predicted_count": pred_counts[c],
+                 "f1": float(f1_score(truth == c, pred == c, zero_division=0))
+                 if true_counts[c] or pred_counts[c] else None}
+                for c in range(num_classes)
+            ],
+        }
+        if bootstrap_replicates and len(truth):
+            scores = []
+            for _ in range(bootstrap_replicates):
+                idx = rng.integers(0, len(truth), size=len(truth))
+                scores.append(compute_subgroup_macro_f1(truth[idx], pred[idx]))
+            row["macro_f1_gt_present_ci95"] = [float(x) for x in np.percentile(scores, [2.5, 97.5])]
+            row["bootstrap_replicates"] = bootstrap_replicates
+        result[group] = row
+    return result
 
 
 def compute_per_class_f1(y_true: np.ndarray, y_pred: np.ndarray, num_classes: int) -> np.ndarray:
@@ -327,7 +384,7 @@ def find_optimal_thresholds(
     all_labels = np.asarray(all_labels)
     all_probs = np.asarray(all_probs)
     thresholds = np.full(num_classes, 0.5)
-    candidates = np.arange(0.05, 0.95, 0.05)
+    candidates = np.linspace(0.10, 0.90, 17)
     for c in range(num_classes):
         if all_labels[:, c].sum() == 0:
             continue

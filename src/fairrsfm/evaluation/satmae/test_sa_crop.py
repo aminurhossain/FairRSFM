@@ -23,6 +23,10 @@ from torch.utils.data import DataLoader
 ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
+from evaluation.checkpoint import load_finetuned_state
+from evaluation.serialization import json_safe
+from evaluation.proj import ensure_proj_data
+ensure_proj_data()
 
 import geobench
 import geobench.task
@@ -223,7 +227,7 @@ def build_and_load_model(ckpt_path: Path, backbone_weights: Path, device: torch.
         bb_state = bb_ckpt.get("model", bb_ckpt.get("state_dict", bb_ckpt))
         model.backbone.load_state_dict(bb_state, strict=False)
 
-    model.load_state_dict(cleaned, strict=False)
+    load_finetuned_state(model, cleaned)
     model.to(device)
     model.eval()
     return model
@@ -333,9 +337,9 @@ def evaluate(model, test_loader, biome_map, device, num_classes=10):
 def main():
     parser = argparse.ArgumentParser(description="Evaluate SatMAE SA-Crop Segmentation Checkpoint")
     parser.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint .ckpt file")
-    parser.add_argument("--backbone_ckpt", type=str, default=str(ROOT_DIR / "checkpoints/satmae/pretrain-vit-base-e199.pth"))
+    parser.add_argument("--backbone_ckpt", type=str, default=str(ROOT_DIR.parents[1] / "checkpoints/satmae/pretrain-vit-base-e199.pth"))
     parser.add_argument("--data_dir", type=str, default=None, help="Path to GeoBench data root")
-    parser.add_argument("--biome_json", type=str, default=str(ROOT_DIR / "configs/sa_crop_biome_mapping.json"))
+    parser.add_argument("--biome_json", type=str, default=str(ROOT_DIR.parents[1] / "experiments/configs/data_mappings/sa_crop_biome_mapping.json"))
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--gpu", type=str, default="0")
     parser.add_argument("--out_json", type=str, default=None, help="Output JSON path")
@@ -343,9 +347,9 @@ def main():
 
     device = torch.device(f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu")
 
-    data_dir = Path(args.data_dir) if args.data_dir else (ROOT_DIR / "configs/geobench")
+    data_dir = Path(args.data_dir) if args.data_dir else Path(os.environ.get("GEO_BENCH_DIR", "/data1/aminur/dataset/geobench"))
     if not data_dir.exists():
-        data_dir = ROOT_DIR / "Geobench"
+        raise FileNotFoundError(f"GeoBench data directory not found: {data_dir}")
     benchmark_dir = data_dir / "segmentation_v1.0"
 
     tasks = list(geobench.task_iterator(benchmark_name="segmentation_v1.0", benchmark_dir=str(benchmark_dir)))
@@ -376,7 +380,7 @@ def main():
     out_path = Path(args.out_json) if args.out_json else Path(args.ckpt).parent / "test_results.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as f:
-        json.dump(results, f, indent=2)
+        json.dump(json_safe(results), f, indent=2, allow_nan=False)
     print(f"Results saved to: {out_path}\n")
 
 

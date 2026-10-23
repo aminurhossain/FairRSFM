@@ -15,7 +15,6 @@ from collections import defaultdict
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.metrics import f1_score, average_precision_score
@@ -24,11 +23,15 @@ from sklearn.metrics import f1_score, average_precision_score
 ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
+from evaluation.checkpoint import load_finetuned_state
+from evaluation.prithvi.bolp import attach_classification_bolp
+from evaluation.serialization import json_safe
 
 try:
     import pyproj
-    os.environ.setdefault("PROJ_DATA", pyproj.datadir.get_data_dir())
-    os.environ.setdefault("PROJ_LIB", pyproj.datadir.get_data_dir())
+    if not (Path(os.environ.get("PROJ_DATA", "")) / "proj.db").is_file():
+        os.environ["PROJ_DATA"] = pyproj.datadir.get_data_dir()
+        os.environ["PROJ_LIB"] = pyproj.datadir.get_data_dir()
 except Exception:
     pass
 
@@ -41,8 +44,13 @@ from terratorch.models.backbones import prithvi_vit
 from evaluation.metrics import (
     compute_subgroup_macro_f1_multilabel,
     compute_per_class_f1_multilabel,
+    compute_ece_multilabel,
+    compute_map_multilabel,
+    compute_equalized_odds_multilabel,
+    compute_demographic_parity_multilabel,
     compute_fairness_summary,
 )
+from evaluation.thresholds import load_validation_thresholds, resolve_checkpoint_epoch
 
 BANDS = [
     HLSBands.BLUE, HLSBands.GREEN, HLSBands.RED,
@@ -122,31 +130,6 @@ def load_biome_map(json_path: Path) -> dict:
     return biome_map
 
 
-class BOLPProjector(nn.Module):
-    def __init__(self, global_centroid: torch.Tensor, Pk: torch.Tensor,
-                 mu_table: torch.Tensor = None, biome_index: dict = None,
-                 k: int = 1, skip_residualization: bool = True):
-        super().__init__()
-        self.skip_residualization = skip_residualization
-        self.k = k
-        self.biome_index = biome_index or {}
-        self.register_buffer("mu0", global_centroid)
-        self.register_buffer("Pk", Pk)
-        if mu_table is not None:
-            self.register_buffer("mu_table", mu_table)
-        else:
-            self.mu_table = None
-
-    def forward(self, z: torch.Tensor, biome_ids: list = None) -> torch.Tensor:
-        z_tilde = z.clone()
-        if not self.skip_residualization and biome_ids is not None and self.mu_table is not None:
-            for i, biome in enumerate(biome_ids):
-                idx = self.biome_index.get(biome, None)
-                if idx is not None:
-                    z_tilde[i] = z[i] - self.mu_table[idx] + self.mu0
-        return z_tilde @ self.Pk.T
-
-
 def build_and_load_model(ckpt_path: Path, backbone_weights: Path, device: torch.device):
     print(f"[Loading] Checkpoint: {ckpt_path}")
     factory = PrithviModelFactory()
@@ -166,44 +149,12 @@ def build_and_load_model(ckpt_path: Path, backbone_weights: Path, device: torch.
     is_bolp = any("projector" in k or "Pk" in k for k in sd.keys())
     if is_bolp:
         print("[Model Type] Detected BOLP Checkpoint — attaching projection hook")
-        mu0 = sd.get("projector.mu0", torch.zeros(1024))
-        Pk = sd.get("projector.Pk", None)
-        if Pk is None:
-            for k in sd.keys():
-                if "Pk" in k:
-                    Pk = sd[k]
-                    break
-        mu_table = sd.get("projector.mu_table", None)
-        biome_index = ckpt.get("bolp_biome_index", {})
-        skip_resid = ckpt.get("bolp_skip_residualization", True)
-        bolp_k = ckpt.get("bolp_k", Pk.shape[0] if Pk is not None else 1)
-
-        projector = BOLPProjector(
-            global_centroid=mu0, Pk=Pk, mu_table=mu_table,
-            biome_index=biome_index, k=bolp_k, skip_residualization=skip_resid
-        )
-        projector.to(device)
-
-        def hook_fn(module, input, output):
-            if isinstance(output, (list, tuple)):
-                last = output[-1]
-            else:
-                last = output
-            if last.dim() > 2:
-                last = last.mean(dim=list(range(1, last.dim() - 1))) if last.dim() == 3 else last.mean(dim=[-2, -1])
-            last = projector(last)
-            if isinstance(output, (list, tuple)):
-                out_list = list(output)
-                out_list[-1] = last
-                return type(output)(out_list)
-            return last
-
-        base_model.encoder.register_forward_hook(hook_fn)
+        attach_classification_bolp(base_model, ckpt, sd, device)
     else:
         print("[Model Type] Detected Standard Head (ERM / GroupDRO / DBR)")
 
     model_sd = {k.replace("model.", "", 1): v for k, v in sd.items() if k.startswith("model.")}
-    base_model.load_state_dict(model_sd, strict=False)
+    load_finetuned_state(base_model, model_sd)
     base_model.to(device)
     base_model.eval()
 
@@ -217,6 +168,8 @@ def evaluate(base_model, test_loader, biome_map, device, num_classes=43, thresho
     with torch.no_grad():
         for x, y, sample_ids in test_loader:
             x = x.to(device)
+            if hasattr(base_model, "bolp_projector"):
+                base_model.bolp_biome_ids = [biome_map.get(str(sid), "Unknown") for sid in sample_ids]
             out = base_model(x)
             logits = out.logits if hasattr(out, "logits") else (out.output if hasattr(out, "output") else out)
             probs  = torch.sigmoid(logits.float()).cpu().numpy()
@@ -236,15 +189,14 @@ def evaluate(base_model, test_loader, biome_map, device, num_classes=43, thresho
     all_probs = np.array(all_probs)
     all_pred  = (all_probs >= threshold).astype(int)
 
-    global_macro_f1 = float(f1_score(all_true, all_pred, average="macro", zero_division=0))
+    global_macro_f1 = compute_subgroup_macro_f1_multilabel(all_true, all_pred, num_classes)
     global_micro_f1 = float(f1_score(all_true, all_pred, average="micro", zero_division=0))
 
-    try:
-        global_map = float(average_precision_score(all_true, all_probs, average="macro"))
-    except Exception:
-        global_map = float("nan")
+    global_map = compute_map_multilabel(all_true, all_probs, num_classes)
+    global_acc = float((all_pred == all_true).all(axis=1).mean())
+    global_ece = compute_ece_multilabel(all_true, all_probs)
 
-    biome_macro_f1, biome_counts = {}, {}
+    biome_macro_f1, biome_eces, biome_counts = {}, {}, {}
     per_group_metrics = {}
 
     for b in sorted(biome_data.keys()):
@@ -253,36 +205,60 @@ def evaluate(base_model, test_loader, biome_map, device, num_classes=43, thresho
         if len(yt) == 0:
             continue
         yp = (pr >= threshold).astype(int)
-        b_macro = compute_subgroup_macro_f1_multilabel(yt, yp)
+        b_macro = compute_subgroup_macro_f1_multilabel(yt, yp, num_classes)
         b_micro = float(f1_score(yt, yp, average="micro", zero_division=0))
-        try:
-            b_map = float(average_precision_score(yt, pr, average="macro"))
-        except Exception:
-            b_map = float("nan")
+        b_map = compute_map_multilabel(yt, pr, num_classes)
+        b_ece = compute_ece_multilabel(yt, pr)
+        b_acc = float((yp == yt).all(axis=1).mean())
+        active_classes = [c for c in range(num_classes) if np.any(yt[:, c] == 1)]
+        biome_data[b]["pred"] = yp
 
         biome_macro_f1[b] = b_macro
+        biome_eces[b] = b_ece
         biome_counts[b]   = len(yt)
         per_group_metrics[b] = {
             "macro_f1": b_macro,
             "micro_f1": b_micro,
-            "map": b_map,
-            "count": len(yt),
+            "mAP": b_map,
+            "exact_accuracy": b_acc,
+            "ece": b_ece,
+            "sample_count": len(yt),
+            "active_class_ids": active_classes,
+            "active_class_count": len(active_classes),
         }
 
     fairness = compute_fairness_summary(biome_macro_f1)
-    per_class_f1_overall, per_group_class_f1 = compute_per_class_f1_multilabel(all_true, all_pred, biome_data, num_classes)
+    ece_values = [v for v in biome_eces.values() if np.isfinite(v)]
+    ece_disparity = max(ece_values) - min(ece_values) if ece_values else float("nan")
+    equalized_odds = compute_equalized_odds_multilabel(biome_data, num_classes)
+    demographic_parity = compute_demographic_parity_multilabel(biome_data, num_classes)
+    per_class_f1_overall = compute_per_class_f1_multilabel(all_true, all_pred, num_classes).tolist()
+    per_group_class_f1 = {
+        b: compute_per_class_f1_multilabel(
+            np.asarray(d["true"]), (np.asarray(d["probs"]) >= threshold).astype(int), num_classes
+        ).tolist()
+        for b, d in biome_data.items()
+    }
 
     return {
         "global_macro_f1": global_macro_f1,
         "global_micro_f1": global_micro_f1,
         "global_map": global_map,
+        "global_accuracy": global_acc,
+        "global_ece": global_ece,
         "worst_case_macro_f1": fairness["worst_case"],
         "best_case_macro_f1": fairness["best_case"],
         "macro_f1_disparity": fairness["disparity"],
-        "performance_equity_ratio": fairness["performance_equity_ratio"],
-        "gini_coefficient": fairness["gini_coefficient"],
-        "normalized_fairness_range": fairness["normalized_fairness_range"],
+        "group_mean_macro_f1": fairness["mean"],
+        "group_macro_f1_std": fairness["std"],
+        "performance_equity_ratio": fairness["per"],
+        "gini_coefficient": fairness["gini"],
+        "normalized_fairness_range": fairness["nfr"],
+        "ece_disparity": ece_disparity,
+        "equalized_odds_disparity": equalized_odds,
+        "demographic_parity_disparity": demographic_parity,
         "per_biome_macro_f1": biome_macro_f1,
+        "per_biome_ece": biome_eces,
         "per_group_metrics": per_group_metrics,
         "per_class_f1": per_class_f1_overall,
         "per_group_class_f1": per_group_class_f1,
@@ -293,12 +269,13 @@ def evaluate(base_model, test_loader, biome_map, device, num_classes=43, thresho
 def main():
     parser = argparse.ArgumentParser(description="Evaluate Prithvi BigEarthNet Checkpoint")
     parser.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint .ckpt file")
-    parser.add_argument("--backbone_ckpt", type=str, default=str(ROOT_DIR / "models/Prithvi_EO_V2_300M_TL.pt"))
+    parser.add_argument("--backbone_ckpt", type=str, default=str(ROOT_DIR.parents[1] / "checkpoints/Prithvi_EO_V2_300M_TL.pt"))
     parser.add_argument("--data_dir", type=str, default=None, help="Path to GeoBench data root")
-    parser.add_argument("--biome_json", type=str, default=str(ROOT_DIR / "configs/bigearthnet_biome_mapping.json"))
+    parser.add_argument("--biome_json", type=str, default=str(ROOT_DIR.parents[1] / "experiments/configs/data_mappings/bigearthnet_biome_mapping.json"))
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--gpu", type=str, default="0")
-    parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--thresholds-json", required=True, help="Validation-selected 43-class threshold vector or val_results.json")
+    parser.add_argument("--thresholds-epoch", type=int, default=None, help="Epoch of the selected checkpoint")
     parser.add_argument("--out_json", type=str, default=None, help="Output JSON path")
     args = parser.parse_args()
 
@@ -327,7 +304,11 @@ def main():
     base_model = build_and_load_model(Path(args.ckpt), Path(args.backbone_ckpt), device)
 
     print("\nRunning evaluation on BigEarthNet test split...")
-    results = evaluate(base_model, test_loader, biome_map, device, num_classes=NUM_CLASSES, threshold=args.threshold)
+    threshold_epoch = resolve_checkpoint_epoch(args.ckpt, args.thresholds_epoch)
+    thresholds = load_validation_thresholds(args.thresholds_json, NUM_CLASSES, threshold_epoch)
+    results = evaluate(base_model, test_loader, biome_map, device, num_classes=NUM_CLASSES, threshold=thresholds)
+    results["optimal_thresholds"] = thresholds.tolist()
+    results["threshold_epoch"] = threshold_epoch
 
     print("\n" + "=" * 60)
     print("Prithvi BigEarthNet Test Evaluation Results")
@@ -343,7 +324,7 @@ def main():
     out_json = Path(args.out_json) if args.out_json else Path(args.ckpt).parent / "test_results.json"
     out_json.parent.mkdir(parents=True, exist_ok=True)
     with open(out_json, "w") as f:
-        json.dump(results, f, indent=2)
+        json.dump(json_safe(results), f, indent=2, allow_nan=False)
     print(f"\n[Saved] Test results saved to: {out_json}")
 
 

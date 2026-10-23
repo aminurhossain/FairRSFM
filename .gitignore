@@ -32,11 +32,11 @@ Thumbs.db
 
 # Experiment outputs, logs, and WandB
 scratch/
-experiments/outputs/*
-!experiments/outputs/.gitignore
 DOFA/
 runs/
 runs_mmearth/
+logs/
+outputs/
 lightning_logs/
 wandb/
 *.log
@@ -46,6 +46,7 @@ slurm-*.out
 # Internal smoke-test scripts & local check results
 BENCHMARK_RESULTS.md
 launch_benchmark_tmux.sh
+launch_eurosat_sacrop.sh
 experiments/launch_benchmark_tmux.sh
 experiments/run_tmux_worker.sh
 experiments/run_48_benchmarks.py

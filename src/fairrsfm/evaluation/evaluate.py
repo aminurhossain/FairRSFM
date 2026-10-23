@@ -47,7 +47,14 @@ def main():
     parser.add_argument("--batch_size", type=int, default=None, help="Inference batch size")
     parser.add_argument("--gpu", type=str, default="0", help="GPU device ID")
     parser.add_argument("--out_json", type=str, default=None, help="Output metrics JSON path")
+    parser.add_argument("--thresholds-json", type=str, default=None,
+                        help="BigEarthNet validation threshold record (val_results.json)")
+    parser.add_argument("--thresholds-epoch", type=int, default=None,
+                        help="Selected checkpoint epoch when its metadata does not contain one")
     args, unknown = parser.parse_known_args()
+
+    if args.dataset == "bigearthnet" and not args.thresholds_json:
+        parser.error("BigEarthNet requires --thresholds-json from the matching validation run")
 
     key = (args.model.lower(), args.dataset.lower())
     if key not in EVAL_DISPATCH:
@@ -70,6 +77,10 @@ def main():
         cmd.extend(["--batch_size", str(args.batch_size)])
     if args.out_json:
         cmd.extend(["--out_json", str(args.out_json)])
+    if args.thresholds_json:
+        cmd.extend(["--thresholds-json", args.thresholds_json])
+    if args.thresholds_epoch is not None:
+        cmd.extend(["--thresholds-epoch", str(args.thresholds_epoch)])
     if unknown:
         cmd.extend(unknown)
 

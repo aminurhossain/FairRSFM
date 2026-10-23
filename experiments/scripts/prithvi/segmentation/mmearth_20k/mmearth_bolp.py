@@ -15,10 +15,8 @@ Biome grouping: 14 RESOLVE biomes → 5 macro groups (from tile_info.json, 1-ind
   "xeric & mineralogical"           → 13
   "hydrologically modulated"        → 9, 14
 
-JSON per-epoch metrics saved to <out_dir>/test_metrics.json:
-  epoch_N → { val: { global_miou, worst_biome_miou, nfr, biome_std,
-                     eqodds, macro_f1, biome_wise_miou_table },
-              test: { same keys } }
+Validation metrics are saved each epoch to <out_dir>/val_results.json.
+Selected-checkpoint test metrics are saved to <out_dir>/test_selected.json.
 """
 
 from __future__ import annotations
@@ -451,7 +449,9 @@ def evaluate_split(
             filenames = batch["filename"]
 
             if bolp_module is not None:
-                logits = bolp_module.forward_with_bolp(model, images)
+                logits = bolp_module.forward_with_bolp(
+                    model, images, tile_ids=list(filenames), tile_info=tile_info
+                )
             else:
                 logits = model.model(images).output
 
@@ -518,9 +518,8 @@ def save_epoch_metrics(
     out_dir: Path,
     epoch: int,
     val_metrics: dict,
-    test_metrics: dict,
 ) -> None:
-    json_path = out_dir / "test_metrics.json"
+    json_path = out_dir / "val_results.json"
     history: dict = {}
     if json_path.exists():
         try:
@@ -532,7 +531,6 @@ def save_epoch_metrics(
     history[f"epoch_{epoch}"] = {
         "epoch": epoch,
         "val":   val_metrics,
-        "test":  test_metrics,
     }
 
     with open(json_path, "w") as f:
@@ -592,22 +590,20 @@ class ConsoleMetricsLogger(Callback):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 8. PER-EPOCH METRICS CALLBACK  (val + test JSON export every epoch)
+# 8. PER-EPOCH VALIDATION METRICS CALLBACK
 # ─────────────────────────────────────────────────────────────────────────────
 
 class EpochMetricsSaverCallback(Callback):
     """
     After every validation epoch (skipping sanity check):
       1. Compute val metrics over val_loader
-      2. Compute test metrics over test_loader
-      3. Append both to test_metrics.json under key epoch_N
+      2. Append validation metrics to val_results.json under key epoch_N
     Also stores val biome mious on pl_module for DBR to consume.
     """
 
     def __init__(
         self,
         val_loader:   DataLoader,
-        test_loader:  DataLoader,
         tile_info:    dict,
         num_classes:  int,
         out_dir:      Path,
@@ -617,7 +613,6 @@ class EpochMetricsSaverCallback(Callback):
     ) -> None:
         super().__init__()
         self.val_loader   = val_loader
-        self.test_loader  = test_loader
         self.tile_info    = tile_info
         self.num_classes  = num_classes
         self.out_dir      = out_dir
@@ -635,15 +630,14 @@ class EpochMetricsSaverCallback(Callback):
             pl_module, self.val_loader,  self.tile_info,
             self.num_classes, self.device, self.ignore_index, self.bolp_module,
         )
-        test_metrics = evaluate_split(
-            pl_module, self.test_loader, self.tile_info,
-            self.num_classes, self.device, self.ignore_index, self.bolp_module,
-        )
-
         # expose val biome mious to pl_module so DBR callback can read them
         pl_module.val_biome_metrics = val_metrics.get("biome_wise_miou_table", {})
+        # Select checkpoints with the same present-class mIoU saved in val_results.
+        pl_module.log("val/benchmark_miou", val_metrics["global_miou"],
+                      on_step=False, on_epoch=True, prog_bar=True,
+                      add_dataloader_idx=False)
 
-        save_epoch_metrics(self.out_dir, epoch, val_metrics, test_metrics)
+        save_epoch_metrics(self.out_dir, epoch, val_metrics)
 
         # print summary
         print(
@@ -657,7 +651,6 @@ class EpochMetricsSaverCallback(Callback):
             f"  Group mIoU Std                                {val_metrics.get('biome_std', float('nan')):.4f}\\n"
             f"  Equalized Odds Disparity                      {val_metrics.get('eqodds', float('nan')):.4f}\\n"
             f"  Demographic Parity Disparity                  {val_metrics.get('dpm', float('nan')):.4f}\\n"
-            f"  [Test mIoU]                                   {test_metrics.get('global_miou', float('nan')):.4f}\\n"
             f"══════════════════════════════════════════════════════════════════════════════════\\n"
         )
 
@@ -1116,6 +1109,7 @@ class BOLPSemanticSegmentationTask(SemanticSegmentationTask):
         masks  = batch["mask"].squeeze(1)
         logits = self._bolp_forward(batch)
         loss   = F.cross_entropy(logits, masks, ignore_index=-1)
+        self.train_metrics.update(logits.argmax(dim=1), masks)
         self.log("train/loss", loss, on_step=True, on_epoch=True,
                  prog_bar=True, batch_size=logits.size(0))
         return loss
@@ -1125,15 +1119,8 @@ class BOLPSemanticSegmentationTask(SemanticSegmentationTask):
         logits = self._bolp_forward(batch)
         loss   = F.cross_entropy(logits, masks, ignore_index=-1)
         preds  = logits.argmax(dim=1)
+        self.val_metrics.update(preds, masks)
         self.log("val/loss", loss, prog_bar=True, batch_size=logits.size(0))
-        miou_metric = getattr(self, "val_metrics", None)
-        if miou_metric is not None:
-            try:
-                miou_metric.update(preds, masks)
-                self.log("val/mIoU", miou_metric, prog_bar=True,
-                         on_epoch=True, batch_size=logits.size(0))
-            except Exception:
-                pass
         return loss
 
     def test_step(self, batch, batch_idx):
@@ -1141,6 +1128,7 @@ class BOLPSemanticSegmentationTask(SemanticSegmentationTask):
         logits = self._bolp_forward(batch)
         loss   = F.cross_entropy(logits, masks, ignore_index=-1)
         self.log("test/loss", loss, batch_size=logits.size(0))
+        self.test_metrics[0].update(logits.argmax(dim=1), masks)
         return loss
 
 
@@ -1617,10 +1605,11 @@ def main() -> None:
     checkpoint_callback = None
     if not args.disable_checkpointing:
         checkpoint_callback = ModelCheckpoint(
-            monitor  = "val/mIoU",
+            monitor  = "val/benchmark_miou",
             mode     = "max",
             dirpath  = str(checkpoint_dir),
-            filename = f"{mode_tag}" + "-{epoch:02d}-{val_mIoU:.4f}",
+            filename = f"{mode_tag}" + "-{epoch:02d}-{val/benchmark_miou:.4f}",
+            auto_insert_metric_name = False,
             save_top_k = 1,
             save_last  = True,
         )
@@ -1638,7 +1627,6 @@ def main() -> None:
     # per-epoch JSON metrics saver (also feeds val_biome_metrics to DBR)
     epoch_metrics_cb = EpochMetricsSaverCallback(
         val_loader   = val_loader,
-        test_loader  = test_loader,
         tile_info    = tile_info,
         num_classes  = num_classes,
         out_dir      = out_dir,
@@ -1705,6 +1693,16 @@ def main() -> None:
 
         if test_ckpt:
             load_checkpoint_weights(model, test_ckpt, device)
+
+        selected_test_metrics = evaluate_split(
+            model, test_loader, tile_info, num_classes, device,
+            ignore_index=-1, bolp_module=bolp_module,
+        )
+        (out_dir / "test_selected.json").write_text(json.dumps({
+            "checkpoint": str(test_ckpt) if test_ckpt else None,
+            "selection": "validation checkpoint",
+            "metrics": selected_test_metrics,
+        }, indent=2))
 
         if not args.skip_biome_metrics:
             evaluate_biome_metrics_csv(

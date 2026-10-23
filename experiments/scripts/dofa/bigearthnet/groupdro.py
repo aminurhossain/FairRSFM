@@ -56,6 +56,7 @@ from models.dofa_wrapper import DOFAClassifier
 from models.lars import LARS
 
 from sklearn.metrics import average_precision_score, f1_score, accuracy_score
+from fairrsfm.evaluation.metrics import compute_ece_multilabel
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -313,20 +314,6 @@ def compute_gini(values: list) -> float:
     return float(np.sum((2 * index - n - 1) * arr) / (n * sum_val))
 
 
-def compute_ece_metric(y_true: np.ndarray, probs: np.ndarray, preds: np.ndarray, n_bins: int = 10) -> float:
-    if len(y_true) == 0:
-        return float("nan")
-    y_max = y_true.max(axis=1)
-    p_max = probs.max(axis=1)
-    pred_max = preds.max(axis=1)
-    correct = (pred_max == y_max).astype(float)
-    ece_val, n = 0.0, len(y_true)
-    for lo, hi in zip(np.linspace(0, 1, n_bins + 1)[:-1], np.linspace(0, 1, n_bins + 1)[1:]):
-        mask = (p_max >= lo) & (p_max < hi)
-        if mask.sum() == 0:
-            continue
-        ece_val += (mask.sum() / n) * abs(correct[mask].mean() - p_max[mask].mean())
-    return float(ece_val)
 
 
 def compute_equalized_odds(biome_data: dict, num_classes: int) -> float:
@@ -597,7 +584,7 @@ class BiomeMultiLabelLogger(Callback):
             map_score = float(average_precision_score(y_true[:, present_c], probs[:, present_c], average="macro")) if present_c else float("nan")
             
             acc = float(((yp_opt == y_true).all(axis=1)).mean())
-            ece = compute_ece_metric(y_true, probs, yp_opt)
+            ece = compute_ece_multilabel(y_true, probs)
 
             group_f1_opts[group] = f1_opt
             group_f1_05s[group]  = f1_05

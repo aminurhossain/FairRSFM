@@ -23,11 +23,14 @@ from torch.utils.data import DataLoader
 ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
+from evaluation.checkpoint import load_finetuned_state
+from evaluation.serialization import json_safe
 
 try:
     import pyproj
-    os.environ.setdefault("PROJ_DATA", pyproj.datadir.get_data_dir())
-    os.environ.setdefault("PROJ_LIB", pyproj.datadir.get_data_dir())
+    if not (Path(os.environ.get("PROJ_DATA", "")) / "proj.db").is_file():
+        os.environ["PROJ_DATA"] = pyproj.datadir.get_data_dir()
+        os.environ["PROJ_LIB"] = pyproj.datadir.get_data_dir()
 except Exception:
     pass
 
@@ -52,7 +55,7 @@ BANDS = [
 ]
 PRITHVI_BAND_INDICES = [1, 2, 3, 7, 8, 9]
 NUM_CLASSES  = 10
-IGNORE_INDEX = 0
+IGNORE_INDEX = -1
 
 
 class GeoBenchSegDataset(torch.utils.data.Dataset):
@@ -198,7 +201,7 @@ def build_and_load_model(ckpt_path: Path, backbone_weights: Path, device: torch.
         print("[Model Type] Detected Standard Head (ERM / GroupDRO / DBR)")
 
     model_sd = {k.replace("model.", "", 1): v for k, v in sd.items() if k.startswith("model.")}
-    base_model.load_state_dict(model_sd, strict=False)
+    load_finetuned_state(base_model, model_sd)
     base_model.to(device)
     base_model.eval()
 
@@ -253,6 +256,7 @@ def evaluate(base_model, test_loader, biome_map, device, num_classes=10):
         b_miou = compute_miou(yt, yp, num_classes, ignore_index=IGNORE_INDEX)
         b_f1   = compute_macro_f1_seg(yt, yp, num_classes, ignore_index=IGNORE_INDEX)
         b_ece  = compute_ece_seg(yt, pm, yp, ignore_index=IGNORE_INDEX)
+        active_classes = [c for c in range(num_classes) if np.any(yt == c)]
 
         biome_mious[b]  = b_miou
         biome_f1s[b]    = b_f1
@@ -263,6 +267,8 @@ def evaluate(base_model, test_loader, biome_map, device, num_classes=10):
             "macro_f1": b_f1,
             "ece": b_ece,
             "tile_count": len(biome_data[b]["sample_ids"]),
+            "active_class_ids": active_classes,
+            "active_class_count": len(active_classes),
         }
 
     fairness = compute_fairness_summary(biome_mious)
@@ -276,9 +282,9 @@ def evaluate(base_model, test_loader, biome_map, device, num_classes=10):
         "worst_case_miou": fairness["worst_case"],
         "best_case_miou": fairness["best_case"],
         "miou_disparity": fairness["disparity"],
-        "performance_equity_ratio": fairness["performance_equity_ratio"],
-        "gini_coefficient": fairness["gini_coefficient"],
-        "normalized_fairness_range": fairness["normalized_fairness_range"],
+        "performance_equity_ratio": fairness["per"],
+        "gini_coefficient": fairness["gini"],
+        "normalized_fairness_range": fairness["nfr"],
         "equalized_odds_disparity": eq_odds,
         "demographic_parity_difference": dp_diff,
         "per_biome_miou": biome_mious,
@@ -292,9 +298,9 @@ def evaluate(base_model, test_loader, biome_map, device, num_classes=10):
 def main():
     parser = argparse.ArgumentParser(description="Evaluate Prithvi SA-Crop Checkpoint")
     parser.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint .ckpt file")
-    parser.add_argument("--backbone_ckpt", type=str, default=str(ROOT_DIR / "models/Prithvi_EO_V2_300M_TL.pt"))
+    parser.add_argument("--backbone_ckpt", type=str, default=str(ROOT_DIR.parents[1] / "checkpoints/Prithvi_EO_V2_300M_TL.pt"))
     parser.add_argument("--data_dir", type=str, default=None, help="Path to GeoBench data root")
-    parser.add_argument("--biome_json", type=str, default=str(ROOT_DIR / "configs/sa_crop_biome_mapping.json"))
+    parser.add_argument("--biome_json", type=str, default=str(ROOT_DIR.parents[1] / "experiments/configs/data_mappings/sa_crop_biome_mapping.json"))
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--gpu", type=str, default="0")
     parser.add_argument("--out_json", type=str, default=None, help="Output JSON path")
@@ -340,7 +346,7 @@ def main():
     out_json = Path(args.out_json) if args.out_json else Path(args.ckpt).parent / "test_results.json"
     out_json.parent.mkdir(parents=True, exist_ok=True)
     with open(out_json, "w") as f:
-        json.dump(results, f, indent=2)
+        json.dump(json_safe(results), f, indent=2, allow_nan=False)
     print(f"\n[Saved] Test results saved to: {out_json}")
 
 

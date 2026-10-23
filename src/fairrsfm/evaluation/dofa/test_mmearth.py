@@ -23,24 +23,33 @@ from torch.utils.data import DataLoader
 ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
+from evaluation.checkpoint import load_finetuned_state
+from evaluation.serialization import json_safe
 
-from models.dofa_wrapper import DOFAClassifier, DOFASegmentationProbe, DOFAUperNet
-from methods.prithvi.segmentation.mmearth_20k.mmearth_dynamic_world_datamodule import (
-    MMEarthDynamicWorldDataModule,
-    DW_CLASS_NAMES,
+from models.dofa_wrapper import (
+    DOFAClassifier,
+    DOFASegmentationClassifier as DOFASegmentationProbe,
+    DOFAUperNetSegmentationClassifier as DOFAUperNet,
+)
+from fairrsfm.data.mmearth import (
+    MMEarthDynamicWorldSegmentationDataModule,
+    DYNAMIC_WORLD_CLASSES,
+    DEFAULT_DATA_ROOT,
+    find_one,
 )
 from evaluation.metrics import (
     compute_miou,
     compute_macro_f1_seg,
     compute_fairness_summary,
 )
+from fairrsfm.biomes.taxonomy import get_macro_group
 
 DOFA_S2_BANDS = [
-    "B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "B11", "B12"
+    "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8A", "B8", "B9", "B11", "B12"
 ]
-DOFA_WAVELENGTHS = [0.44, 0.49, 0.56, 0.66, 0.70, 0.74, 0.78, 0.84, 0.86, 0.94, 1.61, 2.20]
-NUM_CLASSES  = len(DW_CLASS_NAMES)
-IGNORE_INDEX = 255
+DOFA_WAVELENGTHS = [0.443, 0.490, 0.560, 0.665, 0.705, 0.740, 0.783, 0.865, 0.842, 0.945, 1.610, 2.190]
+NUM_CLASSES  = len(DYNAMIC_WORLD_CLASSES)
+IGNORE_INDEX = -1
 
 
 class MMEarthDatasetWrapper(torch.utils.data.Dataset):
@@ -63,7 +72,7 @@ class DOFABOLPSegmentationProbe(nn.Module):
         super().__init__()
         self.encoder = DOFAClassifier(
             num_classes=0,
-            model_type="vit_base_patch16_224",
+            model_type="dofa_base_patch16_224",
             checkpoint_path=checkpoint_path,
             freeze_backbone=True
         )
@@ -88,8 +97,7 @@ class DOFAUperNetBOLP(nn.Module):
         super().__init__()
         self.base_model = DOFAUperNet(
             num_classes=num_classes,
-            model_type="vit_base_patch16_224",
-            img_size=img_size,
+            model_type="dofa_base_patch16_224",
             checkpoint_path=checkpoint_path,
             freeze_backbone=True
         )
@@ -136,8 +144,7 @@ def build_and_load_model(ckpt_path: Path, backbone_weights: Path, device: torch.
         print("[Model Type] Detected DOFA UPerNet architecture (ERM / GroupDRO / DBR)")
         model = DOFAUperNet(
             num_classes=NUM_CLASSES,
-            model_type="vit_base_patch16_224",
-            img_size=224,
+            model_type="dofa_base_patch16_224",
             checkpoint_path=str(backbone_weights) if backbone_weights.exists() else None,
             freeze_backbone=True
         )
@@ -152,13 +159,13 @@ def build_and_load_model(ckpt_path: Path, backbone_weights: Path, device: torch.
         print("[Model Type] Detected DOFA Linear Probe architecture (ERM / GroupDRO / DBR)")
         model = DOFASegmentationProbe(
             num_classes=NUM_CLASSES,
-            model_type="vit_base_patch16_224",
+            model_type="dofa_base_patch16_224",
             img_size=224,
             checkpoint_path=str(backbone_weights) if backbone_weights.exists() else None,
             freeze_backbone=True
         )
 
-    model.load_state_dict(cleaned, strict=False)
+    load_finetuned_state(model, cleaned)
     model.to(device)
     model.eval()
     return model
@@ -181,7 +188,7 @@ def evaluate(model, test_loader, tile_info_dict, test_ds, device, num_classes=NU
 
             for i, sid in enumerate(sample_ids):
                 info = tile_info_dict.get(sid, {})
-                biome = info.get("biome_desc", info.get("biome", "Unknown"))
+                biome = get_macro_group(int(info["biome"]) + 1) if "biome" in info else "Unknown"
                 if biome != "Unknown":
                     biome_data[biome]["true"].append(labels[i].reshape(-1))
                     biome_data[biome]["pred"].append(preds[i].reshape(-1))
@@ -223,9 +230,9 @@ def evaluate(model, test_loader, tile_info_dict, test_ds, device, num_classes=NU
         "worst_case_miou": fairness["worst_case"],
         "best_case_miou": fairness["best_case"],
         "miou_disparity": fairness["disparity"],
-        "performance_equity_ratio": fairness["performance_equity_ratio"],
-        "gini_coefficient": fairness["gini_coefficient"],
-        "normalized_fairness_range": fairness["normalized_fairness_range"],
+        "performance_equity_ratio": fairness["per"],
+        "gini_coefficient": fairness["gini"],
+        "normalized_fairness_range": fairness["nfr"],
         "per_biome_miou": biome_mious,
         "per_biome_f1": biome_f1s,
         "per_group_metrics": per_group_metrics,
@@ -236,8 +243,8 @@ def evaluate(model, test_loader, tile_info_dict, test_ds, device, num_classes=NU
 def main():
     parser = argparse.ArgumentParser(description="Evaluate DOFA MMEarth Checkpoint")
     parser.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint .ckpt file")
-    parser.add_argument("--backbone_ckpt", type=str, default=str(ROOT_DIR / "models/dofa/DOFA_ViT_base_e100.pth"))
-    parser.add_argument("--data_dir", type=str, default="/data1/aminur/dataset/mmearth", help="Path to MMEarth data root")
+    parser.add_argument("--backbone_ckpt", type=str, default=str(ROOT_DIR.parents[1] / "checkpoints/dofa/DOFA_ViT_base_e100.pth"))
+    parser.add_argument("--data_dir", type=str, default=DEFAULT_DATA_ROOT, help="Path to MMEarth data root")
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--gpu", type=str, default="0")
     parser.add_argument("--out_json", type=str, default=None, help="Output JSON path")
@@ -247,17 +254,15 @@ def main():
     print(f"Device: {device}")
 
     data_root = Path(args.data_dir)
-    tile_info_path = data_root / "tile_info.json"
-    tile_info_dict = {}
-    if tile_info_path.exists():
-        with open(tile_info_path) as f:
-            tile_info_dict = json.load(f)
+    tile_info_path = find_one(data_root, "*tile_info.json")
+    with open(tile_info_path) as f:
+        tile_info_dict = json.load(f)
 
-    dm = MMEarthDynamicWorldDataModule(
+    dm = MMEarthDynamicWorldSegmentationDataModule(
         data_root=data_root,
         batch_size=args.batch_size,
         num_workers=4,
-        bands=DOFA_S2_BANDS,
+        sentinel2_bands=DOFA_S2_BANDS,
         image_size=224,
     )
     dm.setup("test")
@@ -282,7 +287,7 @@ def main():
     out_json = Path(args.out_json) if args.out_json else Path(args.ckpt).parent / "test_results.json"
     out_json.parent.mkdir(parents=True, exist_ok=True)
     with open(out_json, "w") as f:
-        json.dump(results, f, indent=2)
+        json.dump(json_safe(results), f, indent=2, allow_nan=False)
     print(f"\n[Saved] Test results saved to: {out_json}")
 
 

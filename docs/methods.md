@@ -137,6 +137,11 @@ GroupDRO is included as a group-robust optimization baseline. It emphasizes grou
 
 ## Evaluation Metrics
 
+The full mathematical contract, including task-specific ECE, parity metrics,
+class presence, sample standard deviation, and bootstrap units, is recorded in
+[metric-definitions.md](metric-definitions.md). A copy is kept beside the
+original DOFA code at `FairRSFM/evaluation/METRIC_DEFINITIONS.md`.
+
 Let `G_d` be the active biome macro-groups in dataset `d`, with `K = |G_d|`, and let `M_g` be the task score for group `g`.
 
 ### Tier 1: Task performance
@@ -152,7 +157,7 @@ $$
 
 #### Multi-label classification
 
-For m-BigEarthNet, class thresholds `tau_c` are selected on validation data over `[0.1, 0.95]` and fixed for test evaluation:
+For m-BigEarthNet, class thresholds `tau_c` are selected on validation data from `0.10, 0.15, ..., 0.90` and fixed for test evaluation:
 
 $$
 \mathrm{F1@opt}_g =
@@ -188,7 +193,7 @@ $$
 \bar{M}=\frac{1}{K}\sum_g M_g,
 \qquad
 \mathrm{NFR}=
-\frac{\max_gM_g-\min_gM_g}{\bar{M}+\epsilon}.
+\frac{\max_gM_g-\min_gM_g}{\bar{M}},\quad\bar{M}>0.
 $$
 
 Lower is better. NFR measures the relative spread between the strongest and weakest active groups.
@@ -218,6 +223,9 @@ $$
 $$
 
 Lower is better.
+
+This implemented quantity is a Youden-index disparity; it is distinct from
+standard equalized odds, which compares TPR and FPR separately.
 
 #### Demographic-parity metric
 
