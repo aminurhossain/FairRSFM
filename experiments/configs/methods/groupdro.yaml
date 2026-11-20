@@ -2,6 +2,9 @@ method: "GroupDRO"
 full_name: "Group Distributionally Robust Optimization"
 type: "minimax_robust_optimization"
 use_biome_during_training: true
+training_subset: "known_biome"
+sampling: "inverse_group_frequency_with_replacement"
+update_probabilities: "before_weighted_objective"
 hyperparameters:
   group_lr: 0.01
   lr: 0.001

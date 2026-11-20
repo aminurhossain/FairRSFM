@@ -15,18 +15,22 @@ class ClassificationBOLPProjector(nn.Module):
             raise ValueError("BOLP checkpoint lacks biome index or residualization metadata")
         self.biome_index = checkpoint["bolp_biome_index"]
         self.skip_residualization = checkpoint["bolp_skip_residualization"]
+        protocol = checkpoint.get("hyper_parameters", {}).get("method_protocol", {})
+        self.tokenwise = protocol.get("bolp_transform") == "tokenwise_v1"
         self.register_buffer("mu0", state_dict["projector.mu0"])
         self.register_buffer("Pk", state_dict["projector.Pk"])
         self.register_buffer("mu_table", state_dict["projector.mu_table"])
 
     def forward(self, z: torch.Tensor, biome_ids: list[str]) -> torch.Tensor:
-        z_tilde = z.clone()
+        spatial = z.ndim == 4
+        z_tilde = z.movedim(1, -1).clone() if spatial else z.clone()
         if not self.skip_residualization:
             for i, biome in enumerate(biome_ids):
                 index = self.biome_index.get(biome)
                 if index is not None:
-                    z_tilde[i] = z[i] - self.mu_table[index] + self.mu0
-        return z_tilde @ self.Pk.T
+                    z_tilde[i] = z_tilde[i] - self.mu_table[index] + self.mu0
+        result = z_tilde @ self.Pk.T
+        return result.movedim(-1, 1) if spatial else result
 
 
 def attach_classification_bolp(model: nn.Module, checkpoint: dict, state_dict: dict,
@@ -40,10 +44,13 @@ def attach_classification_bolp(model: nn.Module, checkpoint: dict, state_dict: d
 
     def hook_fn(module, inputs, output):
         biome_ids = model.bolp_biome_ids
-        if biome_ids is None:
+        if biome_ids is None and not projector.tokenwise:
             return output
+        if biome_ids is None:
+            last = output[-1] if isinstance(output, (list, tuple)) else output
+            biome_ids = ["Unknown"] * last.shape[0]
         last = output[-1] if isinstance(output, (list, tuple)) else output
-        if last.dim() == 3:
+        if last.dim() == 3 and not projector.tokenwise:
             z_avg = last.mean(dim=1)
             z_hat = projector(z_avg, biome_ids)
             transformed = last + (z_hat - z_avg).unsqueeze(1)

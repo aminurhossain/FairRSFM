@@ -18,6 +18,7 @@ Key Features:
   • Consolidated JSONs: Saves cumulative epoch history to val_results.json and test_results.json under SATMAE/runs/
 """
 
+from fairrsfm.training.protocol import (MethodTrainingMixin, known_training_dataset, lookup_biome, training_loader, configure_training_protocol, dataset_sample_ids, balanced_group_loader, forward_with_sample_ids)
 import sys
 import os
 import json
@@ -120,6 +121,8 @@ class CleanProgressBar(TQDMProgressBar):
 # ─────────────────────────────────────────────────────────────────────────────
 
 BASE_DIR  = ROOT_DIR
+from fairrsfm.training.reporting import report_epoch, evaluating, macro_f1_present, write_json, finalize_selected, record_config
+from fairrsfm.evaluation.serialization import json_safe
 DATA_ROOT = MMEARTH_DIR / "hardcoded"
 
 DEFAULT_CKPT_BASE  = BASE_DIR / "checkpoints/satmae/pretrain-vit-base-e199.pth"
@@ -218,16 +221,9 @@ class MMEarthDatasetWrapper(torch.utils.data.Dataset):
 
 def print_split_biome_distribution(split_name: str, dataset: MMEarthDatasetWrapper, tile_info_dict: dict):
     counts = defaultdict(int)
-    h5 = dataset.dataset._file()
-    metadata = h5["metadata"][:]
-    for idx in dataset.dataset.indices:
-        tile_id = metadata[idx]["tile_id"].decode("utf-8")
-        b = get_macro_biome(tile_info_dict, tile_id)
-        counts[b] += 1
-        
-    print(f"  [{split_name.upper()} Split] Total samples: {len(dataset):,}")
-    for b in sorted(counts.keys()):
-        print(f"    • {b:<36} : {counts[b]:,}")
+    for sid in dataset_sample_ids(dataset):
+        counts[get_macro_biome(tile_info_dict, sid)] += 1
+    print(f"[{split_name}] {dict(counts)}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -491,7 +487,7 @@ def compute_demographic_parity_seg(biome_data: dict, num_classes: int, ignore_in
 # 6. LIGHTNING MODULE
 # ─────────────────────────────────────────────────────────────────────────────
 
-class SatMAESegmentationProbeLightningModule(L.LightningModule):
+class SatMAESegmentationProbeLightningModule(MethodTrainingMixin, L.LightningModule):
     def __init__(self, model: nn.Module, lr: float, weight_decay: float, num_classes: int = NUM_CLASSES):
         super().__init__()
         self.save_hyperparameters(ignore=["model"])
@@ -521,26 +517,8 @@ class SatMAESegmentationProbeLightningModule(L.LightningModule):
     def forward(self, x):
         return self.model(x)
 
-    def training_step(self, batch, batch_idx):
-        x, y, _ = batch
-        logits = self(x)
-        loss = self.loss_fn(logits, y)
-        self.log("train/loss", loss, prog_bar=True, on_step=True, on_epoch=True, batch_size=x.size(0))
-        return loss
 
-    def validation_step(self, batch, batch_idx):
-        x, y, sample_ids = batch
-        logits = self(x)
-        loss = self.loss_fn(logits, y)
-        self.log("val/loss", loss, prog_bar=True, add_dataloader_idx=False, batch_size=x.size(0))
-        return {"logits": logits, "y": y, "sample_ids": sample_ids}
 
-    def test_step(self, batch, batch_idx):
-        x, y, sample_ids = batch
-        logits = self(x)
-        loss = self.loss_fn(logits, y)
-        self.log("test/loss", loss, add_dataloader_idx=False, batch_size=x.size(0))
-        return {"logits": logits, "y": y, "sample_ids": sample_ids}
 
     def configure_optimizers(self):
         trainable = [p for p in self.model.parameters() if p.requires_grad]
@@ -643,132 +621,13 @@ class BiomeSegmentationLogger(Callback):
 
         for i, sid in enumerate(sample_ids):
             group = get_macro_biome(self.tile_info_dict, str(sid))
-            if group == "Unknown":
-                continue
             pl_module._biome_data_val[group]["true"].append(labels[i].reshape(-1))
             pl_module._biome_data_val[group]["pred"].append(preds[i].reshape(-1))
             pl_module._biome_data_val[group]["probs_max"].append(probs_max[i].reshape(-1))
             pl_module._biome_data_val[group]["sample_ids"].append(str(sid))
 
     def _compute_and_log(self, biome_data, epoch, tb, section_title, prefix, pl_module=None):
-        biomes = sorted([b for b in biome_data.keys() if b != "Unknown" and len(biome_data[b]["true"]) > 0])
-        if not biomes:
-            return {}
-
-        all_true = np.concatenate([np.concatenate(biome_data[b]["true"]) for b in biomes], axis=0)
-        all_pred = np.concatenate([np.concatenate(biome_data[b]["pred"]) for b in biomes], axis=0)
-        all_pmax = np.concatenate([np.concatenate(biome_data[b]["probs_max"]) for b in biomes], axis=0)
-
-        global_miou = compute_miou(all_true, all_pred, self.num_classes, ignore_index=IGNORE_INDEX)
-        global_f1   = compute_macro_f1_seg(all_true, all_pred, self.num_classes, ignore_index=IGNORE_INDEX)
-        global_ece  = compute_ece_seg(all_true, all_pmax, all_pred, ignore_index=IGNORE_INDEX)
-
-        biome_mious, biome_f1s, biome_eces, biome_counts = {}, {}, {}, {}
-        per_group_metrics = {}
-        per_class_iou_by_biome = {}
-
-        for b in biomes:
-            yt = np.concatenate(biome_data[b]["true"])
-            yp = np.concatenate(biome_data[b]["pred"])
-            pm = np.concatenate(biome_data[b]["probs_max"])
-
-            b_miou  = compute_miou(yt, yp, self.num_classes, ignore_index=IGNORE_INDEX)
-            b_f1    = compute_macro_f1_seg(yt, yp, self.num_classes, ignore_index=IGNORE_INDEX)
-            b_ece   = compute_ece_seg(yt, pm, yp, ignore_index=IGNORE_INDEX)
-            b_count = len(biome_data[b]["sample_ids"])
-
-            biome_mious[b]  = b_miou
-            biome_f1s[b]    = b_f1
-            biome_eces[b]   = b_ece
-            biome_counts[b] = b_count
-
-            per_group_metrics[b] = {
-                "miou": b_miou,
-                "macro_f1": b_f1,
-                "ece": b_ece,
-                "sample_count": b_count,
-            }
-
-            per_class_iou_by_biome[b] = compute_per_class_iou(yt, yp, self.num_classes, ignore_index=IGNORE_INDEX)
-
-        per_class_iou_table = {}
-        class_disparities = {}
-        for c in range(self.num_classes):
-            c_name = self.class_names[c] if c < len(self.class_names) else f"Class_{c}"
-            c_scores = {}
-            c_vals = []
-            for b in biomes:
-                val = per_class_iou_by_biome[b][c]
-                if not np.isnan(val):
-                    c_scores[b] = float(val)
-                    c_vals.append(float(val))
-            per_class_iou_table[c_name] = c_scores
-            class_disparities[c_name] = float(max(c_vals) - min(c_vals)) if len(c_vals) >= 2 else 0.0
-
-        class_disp_vals = list(class_disparities.values())
-        mean_class_disp = float(np.mean(class_disp_vals)) if class_disp_vals else 0.0
-        max_class_disp  = float(np.max(class_disp_vals)) if class_disp_vals else 0.0
-
-        miou_vals = [v for v in biome_mious.values() if not np.isnan(v)]
-        worst_miou = min(miou_vals) if miou_vals else float("nan")
-        best_miou  = max(miou_vals) if miou_vals else float("nan")
-        mean_miou  = float(np.mean(miou_vals)) if miou_vals else float("nan")
-        miou_std   = float((np.std(miou_vals, ddof=1) if len(miou_vals) > 1 else 0.0)) if miou_vals else 0.0
-        per        = (worst_miou / best_miou) if (best_miou > 0 and not np.isnan(worst_miou)) else 0.0
-        nfr        = (best_miou - worst_miou) / global_miou if global_miou > 0 else float("nan")
-        gini       = compute_gini(miou_vals)
-
-        ece_vals   = [v for v in biome_eces.values() if not np.isnan(v)]
-        ece_disp   = (max(ece_vals) - min(ece_vals)) if ece_vals else float("nan")
-        eq_odds    = compute_eqodds_seg(biome_data, self.num_classes, ignore_index=IGNORE_INDEX)
-        dp_disp    = compute_demographic_parity_seg(biome_data, self.num_classes, ignore_index=IGNORE_INDEX)
-
-        if prefix == "val" and pl_module is not None:
-            pl_module.log("val/worst_case_miou", worst_miou, prog_bar=True, logger=True)
-            pl_module.log("val/performance_equity_ratio", per, prog_bar=False, logger=True)
-
-        res_dict = {
-            "epoch": epoch,
-            "overall_miou": global_miou,
-            "overall_macro_f1": global_f1,
-            "overall_ece": global_ece,
-            "global_miou": global_miou,
-            "global_macro_f1": global_f1,
-            "worst_case_miou": worst_miou,
-            "best_case_miou": best_miou,
-            "group_mean_miou": mean_miou,
-            "group_miou_std": miou_std,
-            "performance_equity_ratio": per,
-            "normalized_fairness_range": nfr,
-            "gini_coefficient": gini,
-            "ece_disparity": ece_disp,
-            "equalized_odds_disparity": eq_odds,
-            "demographic_parity_disparity": dp_disp,
-            "mean_class_disparity": mean_class_disp,
-            "max_class_disparity": max_class_disp,
-            "per_group_metrics": per_group_metrics,
-            "per_biome_miou": biome_mious,
-            "per_biome_macro_f1": biome_f1s,
-            "per_biome_ece": biome_eces,
-            "per_biome_counts": biome_counts,
-            "class_disparities": class_disparities,
-            "per_class_iou_table": per_class_iou_table,
-        }
-
-        if prefix == "val":
-            self.val_history = [h for h in self.val_history if h.get("epoch") != epoch]
-            self.val_history.append(res_dict)
-            self.val_history.sort(key=lambda x: x.get("epoch", 0))
-            with open(self.output_dir / "val_results.json", "w") as f:
-                json.dump(self.val_history, f, indent=2)
-        elif prefix == "test":
-            self.test_history = [h for h in self.test_history if h.get("epoch") != epoch]
-            self.test_history.append(res_dict)
-            self.test_history.sort(key=lambda x: x.get("epoch", 0))
-            with open(self.output_dir / "test_results.json", "w") as f:
-                json.dump(self.test_history, f, indent=2)
-
-        return res_dict
+        return report_epoch(self, biome_data, epoch, tb, section_title, prefix, pl_module, task="mmearth", ignore_index=getattr(self, "ignore_index", IGNORE_INDEX))
 
     def on_validation_epoch_end(self, trainer, pl_module):
         if trainer.sanity_checking or not hasattr(pl_module, "_biome_data_val") or pl_module._biome_data_val is None:
@@ -783,43 +642,43 @@ class BiomeSegmentationLogger(Callback):
             self._eval_test_split(trainer, pl_module, epoch, tb)
 
     def _eval_test_split(self, trainer, pl_module, epoch, tb):
-        pl_module.eval()
-        test_biome_data = self._init_biome_data()
-        device = pl_module.device
+        with evaluating(pl_module):
+            pl_module.eval()
+            test_biome_data = self._init_biome_data()
+            device = pl_module.device
 
-        with torch.no_grad():
-            for batch in self.test_loader:
-                x, y, sample_ids = batch
-                x = x.to(device)
-                logits = pl_module(x)
-                labels = y.numpy()
-                probs  = torch.softmax(logits, dim=1)
-                probs_max = probs.max(dim=1).values.cpu().numpy()
-                preds     = logits.argmax(dim=1).cpu().numpy()
+            with torch.no_grad():
+                for batch in self.test_loader:
+                    x, y, sample_ids = batch
+                    x = x.to(device)
+                    logits = forward_with_sample_ids(pl_module, x, sample_ids)
+                    labels = y.numpy()
+                    probs  = torch.softmax(logits, dim=1)
+                    probs_max = probs.max(dim=1).values.cpu().numpy()
+                    preds     = logits.argmax(dim=1).cpu().numpy()
 
-                for i, sid in enumerate(sample_ids):
-                    group = get_macro_biome(self.tile_info_dict, str(sid))
-                    if group == "Unknown":
-                        continue
-                    test_biome_data[group]["true"].append(labels[i].reshape(-1))
-                    test_biome_data[group]["pred"].append(preds[i].reshape(-1))
-                    test_biome_data[group]["probs_max"].append(probs_max[i].reshape(-1))
-                    test_biome_data[group]["sample_ids"].append(str(sid))
+                    for i, sid in enumerate(sample_ids):
+                        group = get_macro_biome(self.tile_info_dict, str(sid))
+                        test_biome_data[group]["true"].append(labels[i].reshape(-1))
+                        test_biome_data[group]["pred"].append(preds[i].reshape(-1))
+                        test_biome_data[group]["probs_max"].append(probs_max[i].reshape(-1))
+                        test_biome_data[group]["sample_ids"].append(str(sid))
 
-        test_res = self._compute_and_log(test_biome_data, epoch, tb, "group_metrics_test", "test", pl_module=None)
-        
-        print(f"\n── [Epoch {epoch:02d} Results] ──────────────────────────────────────────")
-        print(f"   Val  mIoU: {trainer.callback_metrics.get('val/miou', 0.0):.4f} | Worst: {trainer.callback_metrics.get('val/worst_case_miou', 0.0):.4f} | PER: {trainer.callback_metrics.get('val/performance_equity_ratio', 0.0):.4f}")
-        if test_res:
-            print(f"   Test mIoU: {test_res['global_miou']:.4f} | Worst: {test_res['worst_case_miou']:.4f} | PER: {test_res['performance_equity_ratio']:.4f} | Macro F1: {test_res['global_macro_f1']:.4f}")
-        print("────────────────────────────────────────────────────────────────────────\n")
+            test_res = self._compute_and_log(test_biome_data, epoch, tb, "group_metrics_test", "test", pl_module=None)
+
+            print(f"\n── [Epoch {epoch:02d} Results] ──────────────────────────────────────────")
+            print(f"   Val  mIoU: {trainer.callback_metrics.get('val/miou', 0.0):.4f} | Worst: {trainer.callback_metrics.get('val/worst_case_miou', 0.0):.4f} | PER: {trainer.callback_metrics.get('val/performance_equity_ratio', 0.0):.4f}")
+            if test_res:
+                print(f"   Test mIoU: {test_res['global_miou']:.4f} | Worst: {test_res['worst_case_miou']:.4f} | PER: {test_res['performance_equity_ratio']:.4f} | Macro F1: {test_res['global_macro_f1']:.4f}")
+            print("────────────────────────────────────────────────────────────────────────\n")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 8. MAIN EXECUTION
-# ─────────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────────
+    # 8. MAIN EXECUTION
+    # ─────────────────────────────────────────────────────────────────────────────
 
 def main():
+    global BATCH_SIZE
     logging.getLogger("lightning.pytorch").setLevel(logging.WARNING)
 
     parser = argparse.ArgumentParser(description="SatMAE MMEarth-20k ERM Linear Probe Training")
@@ -833,7 +692,11 @@ def main():
     parser.add_argument("--ckpt-path", type=str, default=None, help="Custom path to pretrained SatMAE weights (.pth)")
     parser.add_argument("--out-dir", type=str, default=None, help="Custom output directory")
     parser.add_argument("--train-samples", "--train_samples", type=int, default=None, help="Limit number of training samples for smoke test")
+    parser.add_argument("--resume-from", type=str, default=None, help="Resume a Lightning checkpoint")
     args = parser.parse_args()
+    if args.batch_size < 1:
+        parser.error("--batch-size must be positive")
+    BATCH_SIZE = args.batch_size
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
     seed = args.seed
@@ -884,6 +747,7 @@ def main():
     datamodule.setup("test")
 
     train_ds = MMEarthDatasetWrapper(datamodule.train_dataset, augment=True)
+    train_ds, protocol_groups = known_training_dataset(train_ds, lambda sid: get_macro_biome(tile_info_dict, sid))
     val_ds   = MMEarthDatasetWrapper(datamodule.val_dataset,   augment=False)
     test_ds  = MMEarthDatasetWrapper(datamodule.test_dataset,  augment=False)
 
@@ -909,8 +773,10 @@ def main():
         weight_decay=args.weight_decay,
         num_classes=NUM_CLASSES
     )
+    configure_training_protocol(pl_model, 'erm', 'mmearth', protocol_groups, args, ignore_index=IGNORE_INDEX, lookup=lambda sid: get_macro_biome(tile_info_dict, sid))
+    args.method_protocol = pl_model.method_protocol.config
 
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
+    train_loader = training_loader(train_ds, method='erm', groups=protocol_groups, batch_size=args.batch_size, shuffle=True,
                               num_workers=NUM_WORKERS, pin_memory=True, persistent_workers=True)
     val_loader   = DataLoader(val_ds,   batch_size=args.batch_size, shuffle=False,
                               num_workers=NUM_WORKERS, pin_memory=True, persistent_workers=True)
@@ -923,10 +789,10 @@ def main():
     CKPT_WORST_DIR.mkdir(parents=True, exist_ok=True)
 
     ckpt_macro_cb = ModelCheckpoint(
-        monitor                 = "val/miou",
+        monitor                 = 'val/benchmark_miou',
         mode                    = "max",
         dirpath                 = CKPT_MACRO_DIR,
-        filename                = f"{mode_str}-miou-epoch={{epoch:02d}}-val_miou={{val/miou:.4f}}",
+        filename                = f"{mode_str}-miou-epoch={{epoch:02d}}-val_miou={{val/benchmark_miou:.4f}}",
         auto_insert_metric_name = False,
         save_top_k              = 3,
         save_last               = True,
@@ -945,7 +811,7 @@ def main():
         verbose                 = False,
     )
     early_stop_cb = EarlyStopping(
-        monitor                 = "val/miou",
+        monitor                 = 'val/benchmark_miou',
         mode                    = "max",
         patience                = EARLY_STOP_PATIENCE,
         min_delta               = EARLY_STOP_MIN_DELTA,
@@ -961,7 +827,7 @@ def main():
         test_loader    = test_loader,
     )
     progress_bar_cb = CleanProgressBar(refresh_rate=20)
-    tb_logger = TensorBoardLogger(save_dir=CURRENT_DIR / "runs", name="tb_logs", version=f"mmearth_erm_seed_{seed}")
+    tb_logger = TensorBoardLogger(save_dir=OUT_DIR / "tb_logs", name="tb_logs", version=f"mmearth_erm_seed_{seed}")
 
     trainer = L.Trainer(
         accelerator             = "gpu",
@@ -980,7 +846,9 @@ def main():
         num_sanity_val_steps    = 2,
     )
 
-    trainer.fit(pl_model, train_loader, val_loader)
+    record_config(OUT_DIR, __file__, args)
+    trainer.fit(pl_model, train_loader, val_loader, ckpt_path=args.resume_from)
+    finalize_selected(trainer, pl_model)
 
     print(f"\n[Training Complete]")
     print(f" Best mIoU Checkpoint     : {ckpt_macro_cb.best_model_path}")

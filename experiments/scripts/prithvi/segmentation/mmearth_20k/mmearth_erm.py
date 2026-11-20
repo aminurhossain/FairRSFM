@@ -24,6 +24,8 @@ from __future__ import annotations
 # ─────────────────────────────────────────────────────────────────────────────
 # 0. SYSTEM SETUP
 # ─────────────────────────────────────────────────────────────────────────────
+from fairrsfm.methods.bolp import PrithviFinalLayerBOLP
+from fairrsfm.training.protocol import (MethodTrainingMixin, known_training_dataset, lookup_biome, training_loader, configure_training_protocol, dataset_sample_ids, balanced_group_loader, forward_with_sample_ids, update_projection_protocol)
 import os
 import ctypes
 try:
@@ -35,6 +37,8 @@ except ImportError:
 os.environ["HUGGINGFACE_HUB_OFFLINE"]  = "1"
 os.environ["TRANSFORMERS_OFFLINE"]     = "1"
 os.environ["NO_ALBUMENTATIONS_UPDATE"] = "1"
+os.environ["PROJ_DATA"] = "/home/aminur/anaconda3/lib/python3.12/site-packages/pyproj/proj_dir/share/proj"
+os.environ["PROJ_LIB"]  = "/home/aminur/anaconda3/lib/python3.12/site-packages/pyproj/proj_dir/share/proj"
 
 try:
     ctypes.CDLL("/usr/lib64/openmpi/lib/libmpi.so.40")
@@ -56,6 +60,8 @@ torch.backends.cudnn.benchmark = True
 # ─────────────────────────────────────────────────────────────────────────────
 
 import sys
+from types import SimpleNamespace
+from fairrsfm.training.reporting import report_epoch, write_json, evaluating, record_config
 import json
 from lightning.pytorch.callbacks import TQDMProgressBar
 
@@ -98,7 +104,7 @@ class CleanProgressBar(TQDMProgressBar):
                 items.pop(k, None)
 
         return items
-    
+
 
 import argparse
 import csv
@@ -119,6 +125,10 @@ from lightning.pytorch.loggers import TensorBoardLogger
 from torch.utils.data import DataLoader
 
 from terratorch.tasks import SemanticSegmentationTask
+
+class ProtocolSemanticSegmentationTask(MethodTrainingMixin, SemanticSegmentationTask):
+    pass
+
 
 from mmearth_dynamic_world_datamodule import (
     DYNAMIC_WORLD_CLASSES,
@@ -176,14 +186,14 @@ TEST_FRACTION = 0.1
 
 # ── DBR config ──
 DBR_ALPHA          = 0.5   # feedback strength
-DBR_EMA            = 0.5   # metric EMA coefficient
+DBR_EMA            = 0.9   # metric EMA coefficient
 DBR_UPDATE_EVERY   = 1     # update weights every N epochs
 
 # ── BOLP config ──
-BOLP_K = 5   # number of top singular vectors to project out (rank of null-space)
+BOLP_K = None   # number of top singular vectors to project out (rank of null-space)
 
 # ── Early stopping ──
-EARLY_STOP_PATIENCE  = 30
+EARLY_STOP_PATIENCE  = 1000
 EARLY_STOP_MIN_DELTA = 1e-4
 
 # ── Misc ──
@@ -429,6 +439,9 @@ def evaluate_split(
     device: torch.device,
     ignore_index: int = -1,
     bolp_module: "BOLPModule | None" = None,
+    epoch: int = 0,
+    label: str = "val",
+    bootstrap_replicates: int = 0,
 ) -> dict:
     model.eval()
     biome_data: dict[str, dict] = {}
@@ -452,7 +465,7 @@ def evaluate_split(
             masks_np = masks.cpu().numpy()
 
             for i, tile_id in enumerate(filenames):
-                group = tile_id_to_macro_group(str(tile_id), tile_info)
+                group = tile_id_to_macro_group(str(tile_id), tile_info) or "Unknown"
                 flat_true = masks_np[i].reshape(-1)
                 flat_pred = preds[i].reshape(-1)
                 all_true.append(flat_true)
@@ -463,44 +476,19 @@ def evaluate_split(
                     biome_data[group]["true"].append(flat_true)
                     biome_data[group]["pred"].append(flat_pred)
 
-    if not all_true:
-        return {}
-
-    y_true = np.concatenate(all_true)
-    y_pred = np.concatenate(all_pred)
-
-    global_miou = compute_miou(y_true, y_pred, num_classes, ignore_index)
-    macro_f1    = compute_macro_f1_seg(y_true, y_pred, num_classes, ignore_index)
-    eqodds      = compute_eqodds_seg(biome_data, num_classes, ignore_index)
-    dpm         = compute_dpm_seg(biome_data, num_classes)
-
-    biome_mious: dict[str, float] = {}
-    biome_f1s: dict[str, float] = {}
-    for group, data in biome_data.items():
-        yt = np.concatenate(data["true"])
-        yp = np.concatenate(data["pred"])
-        biome_mious[group] = compute_miou(yt, yp, num_classes, ignore_index)
-        biome_f1s[group] = compute_macro_f1_seg(yt, yp, num_classes, ignore_index)
-
-    fairness = compute_fairness_metrics(biome_mious, global_miou)
-    
-    valid_mious = [v for v in biome_mious.values() if not math.isnan(v)]
-    gini = compute_gini(valid_mious)
-    per = (min(valid_mious) / max(valid_mious)) if valid_mious and max(valid_mious) > 0 else float('nan')
-
-    return {
-        "global_miou":         global_miou,
-        "macro_f1":            macro_f1,
-        "eqodds":              eqodds,
-        "dpm":                 dpm,
-        "gini":                gini,
-        "per":                 per,
-        "worst_biome_miou":    fairness["worst_biome_miou"],
-        "nfr":                 fairness["nfr"],
-        "biome_std":           fairness["biome_std"],
-        "biome_wise_miou_table": biome_mious,
-        "biome_wise_f1_table": biome_f1s,
-    }
+    if not biome_data:
+        raise ValueError("No observations were collected for this split")
+    callback = SimpleNamespace(num_classes=num_classes,
+                               bootstrap_replicates=bootstrap_replicates)
+    record = report_epoch(callback, biome_data, epoch, None, "metrics", label,
+                          task="mmearth", ignore_index=ignore_index, persist=False)
+    record.update(macro_f1=record["overall_macro_f1"],
+                  biome_wise_miou_table=record["per_biome_miou"],
+                  worst_biome_miou=record["worst_case_miou"],
+                  biome_std=record["group_std"], per=record["performance_equity_ratio"],
+                  gini=record["gini_coefficient"], eqodds=record["equalized_odds_disparity"],
+                  dpm=record["demographic_parity_disparity"])
+    return record
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -512,25 +500,13 @@ def save_epoch_metrics(
     epoch: int,
     val_metrics: dict,
 ) -> None:
-    json_path = out_dir / "val_results.json"
-    history: dict = {}
-    if json_path.exists():
-        try:
-            with open(json_path, "r") as f:
-                history = json.load(f)
-        except Exception as e:
-            print(f"[MetricsSaver] Could not load existing file: {e}")
-
-    history[f"epoch_{epoch}"] = {
-        "epoch": epoch,
-        "val":   val_metrics,
-    }
-
-    with open(json_path, "w") as f:
-        json.dump(history, f, indent=2)
-    print(f"[MetricsSaver] Saved epoch_{epoch} metrics → {json_path}")
-
-
+    path = out_dir / "val_results.json"
+    history = json.loads(path.read_text()) if path.exists() else []
+    if not isinstance(history, list):
+        history = [row.get("val", row) for row in history.values()]
+    history = [r for r in history if r.get("epoch") != epoch]
+    history.append({**val_metrics, "epoch": int(epoch), "split": "val"})
+    write_json(path, history)
 # ─────────────────────────────────────────────────────────────────────────────
 # 7. CONSOLE LOGGER CALLBACK  (unchanged from original file)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -564,7 +540,7 @@ class ConsoleMetricsLogger(Callback):
     def on_train_epoch_end(self, trainer, pl_module) -> None:
         # Filter out intermediate step metrics to keep the epoch summary clean
         filtered_metrics = {
-            k: v for k, v in trainer.callback_metrics.items() 
+            k: v for k, v in trainer.callback_metrics.items()
             if k.startswith("train/") and not k.endswith("_step")
         }
         metrics = self._format_metrics(filtered_metrics, ("train/",))
@@ -601,10 +577,12 @@ class EpochMetricsSaverCallback(Callback):
         num_classes:  int,
         out_dir:      Path,
         device:       torch.device,
+        test_loader: DataLoader,
         ignore_index: int = -1,
         bolp_module:  "BOLPModule | None" = None,
     ) -> None:
         super().__init__()
+        self.test_loader = test_loader
         self.val_loader   = val_loader
         self.tile_info    = tile_info
         self.num_classes  = num_classes
@@ -631,6 +609,16 @@ class EpochMetricsSaverCallback(Callback):
                       add_dataloader_idx=False)
 
         save_epoch_metrics(self.out_dir, epoch, val_metrics)
+        with evaluating(pl_module):
+            test_metrics = evaluate_split(
+                pl_module, self.test_loader, self.tile_info, self.num_classes,
+                self.device, self.ignore_index, self.bolp_module, epoch=epoch, label="test",
+            )
+        path = self.out_dir / "test_results.json"
+        history = json.loads(path.read_text()) if path.exists() else []
+        history = [r for r in history if r.get("epoch") != epoch]
+        history.append({**test_metrics, "epoch": int(epoch), "split": "test"})
+        write_json(path, history)
 
         # print summary
         print(
@@ -652,90 +640,16 @@ class EpochMetricsSaverCallback(Callback):
 # 9. DBR  (Dynamic Biome Reweighting with Validation Feedback)
 # ─────────────────────────────────────────────────────────────────────────────
 
-class DynamicBiomeReweighter:
-    """
-    Initialized with static inverse-frequency weights from the training set.
-    After each validation epoch, weights are updated with:
-        w_b ← w_b * (1 + α * (mean_M - M_b) / (mean_M + ε))
-    then renormalized so the average weight = 1.
-    EMA is applied to running per-biome metrics for smoother trajectories.
-    """
-
-    def __init__(
-        self,
-        train_biome_groups: list[str],   # macro group name per training sample
-        alpha: float = DBR_ALPHA,
-        ema:   float = DBR_EMA,
-    ) -> None:
-        self.alpha = alpha
-        self.ema   = ema
-
-        counts = Counter(train_biome_groups)
-        total  = sum(counts.values())
-        raw    = {b: total / c for b, c in counts.items()}
-        norm   = sum(raw.values()) / len(raw)
-        self.weights: dict[str, float] = {b: w / norm for b, w in raw.items()}
-        self.running_metrics: dict[str, float] = {b: 0.5 for b in self.weights}
-
-        print("[DBR] Initial biome weights (inverse-frequency):")
-        for b, w in sorted(self.weights.items()):
-            print(f"  {b:<45}  w={w:.4f}  (n={counts[b]})")
-
-    def update(self, val_biome_metrics: dict[str, float]) -> None:
-        for b, m in val_biome_metrics.items():
-            if b not in self.running_metrics:
-                continue
-            self.running_metrics[b] = (
-                self.ema * self.running_metrics[b] + (1 - self.ema) * m
-            )
-        mean_m = float(np.mean(list(self.running_metrics.values())))
-        for b in self.weights:
-            gap = (mean_m - self.running_metrics[b]) / (mean_m + 1e-8)
-            self.weights[b] *= (1 + self.alpha * gap)
-        avg = float(np.mean(list(self.weights.values())))
-        for b in self.weights:
-            self.weights[b] /= avg
-
-    def get_weight(self, group: str | None) -> float:
-        if group is None:
-            return 1.0
-        return self.weights.get(group, 1.0)
+from fairrsfm.methods.dbr import DynamicBiomeReweighter
 
 
-class DBRWeightUpdateCallback(Callback):
-    """
-    At the start of each training epoch (after epoch 0):
-      - Read pl_module.val_biome_metrics (set by EpochMetricsSaverCallback)
-      - Update the reweighter
-      - Print updated weights
-    """
-
-    def __init__(self, reweighter: DynamicBiomeReweighter, update_every: int = 1) -> None:
-        super().__init__()
-        self.reweighter   = reweighter
-        self.update_every = update_every
-
-    def on_train_epoch_start(self, trainer, pl_module) -> None:
-        epoch = trainer.current_epoch
-        if epoch == 0:
-            return
-        if epoch % self.update_every != 0:
-            return
-        biome_metrics = getattr(pl_module, "val_biome_metrics", {})
-        if not biome_metrics:
-            return
-        self.reweighter.update(biome_metrics)
-        print(f"\n[DBR] Updated weights at epoch {epoch}:")
-        for b, w in sorted(self.reweighter.weights.items()):
-            m = self.reweighter.running_metrics.get(b, float("nan"))
-            print(f"  {b:<45}  w={w:.4f}  ema_miou={m:.4f}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 10. DBR-AWARE SemanticSegmentationTask WRAPPER
 # ─────────────────────────────────────────────────────────────────────────────
 
-class DBRSemanticSegmentationTask(SemanticSegmentationTask):
+class DBRSemanticSegmentationTask(MethodTrainingMixin, SemanticSegmentationTask):
     """
     Thin subclass of SemanticSegmentationTask that overrides training_step
     to apply per-sample biome loss weighting when use_dbr=True.
@@ -761,319 +675,22 @@ class DBRSemanticSegmentationTask(SemanticSegmentationTask):
         # will be set by EpochMetricsSaverCallback each epoch
         self.val_biome_metrics: dict = {}
 
-    def training_step(self, batch, batch_idx):
-        if not self.use_dbr:
-            return super().training_step(batch, batch_idx)
-
-        # ── DBR path: compute per-sample weighted loss ──
-        images    = batch["image"]
-        masks     = batch["mask"].squeeze(1)   # (B, H, W) long
-        filenames = batch.get("filename", [None] * images.size(0))
-
-        logits = self.model(images).output     # (B, C, H, W)
-
-        # per-pixel loss → (B, H, W)
-        loss_pixel = F.cross_entropy(
-            logits, masks,
-            ignore_index=self._ignore_index,
-            reduction="none",
-        )
-
-        # mean over valid pixels per sample → (B,)
-        valid_mask  = (masks != self._ignore_index).float()
-        loss_sum    = (loss_pixel * valid_mask).sum(dim=(1, 2))
-        valid_count = valid_mask.sum(dim=(1, 2)).clamp(min=1)
-        per_sample_loss = loss_sum / valid_count  # (B,)
-
-        # biome weights per sample
-        weights = torch.tensor(
-            [
-                self.reweighter.get_weight(
-                    tile_id_to_macro_group(str(tid), self.tile_info)
-                )
-                for tid in filenames
-            ],
-            dtype=torch.float32,
-            device=logits.device,
-        )
-
-        loss = (per_sample_loss * weights).mean()
-
-        # log manually (mirrors what SemanticSegmentationTask does)
-        self.log("train/loss", loss, on_step=True, on_epoch=True,
-                 prog_bar=True, batch_size=images.size(0))
-        return loss
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 11. BOLP MODULE
 # ─────────────────────────────────────────────────────────────────────────────
 
-class BOLPModule:
-    """
-    Biome-Orthogonal Linear Probing preprocessing.
-
-    Phase A (precompute, call once before training):
-      1. Extract frozen encoder features for all training samples
-         → mean-pool patch tokens to get one vector per image
-      2. Compute per-biome centroids µ_b and global mean µ_0
-      3. Form M = [µ_b - µ_0, ...], compute thin SVD, keep top-k left singular vectors U_k
-      4. Build projection matrix P = I - U_k @ U_k.T
-
-    Phase B (forward_with_bolp, called at training/val/test time):
-      z     = mean-pooled encoder features
-      z_res = z - µ_biome + µ_0           (Step 1: residualize)
-      z_hat = P @ z_res                   (Step 2: project out biome directions)
-      logits = decoder(z_hat)             ← NOT YET: for segmentation we inject
-                                            z_hat back as the token sequence
-                                            before the decoder neck.
-
-    Note on segmentation BOLP:
-      Prithvi outputs patch token sequences of shape (B, N_tokens, d).
-      We apply:
-        (a) mean-pool across tokens → (B, d) for centroid computation
-        (b) at inference, residualize and project EACH token independently
-            using the same µ_b (image-level) and P (shared), then pass the
-            projected token sequence to the neck + decoder.
-    """
-
-    def __init__(self, k: int = BOLP_K, device: torch.device = torch.device("cpu")) -> None:
-        self.k      = k
-        self.device = device
-        self.mu:    dict[str, torch.Tensor] = {}   # group → centroid (d,)
-        self.mu0:   torch.Tensor | None = None     # global mean (d,)
-        self.P:     torch.Tensor | None = None     # projection matrix (d, d)
-        self._fitted = False
-
-    # ── helpers ──────────────────────────────────────────────────────────────
-
-    @staticmethod
-    def _get_encoder(model: SemanticSegmentationTask):
-        """
-        Safely retrieve the encoder from SemanticSegmentationTask.
-        Tries common attribute paths used by terratorch.
-        """
-        inner = getattr(model, "model", model)
-        for attr in ("encoder", "backbone", "encoder_backbone"):
-            enc = getattr(inner, attr, None)
-            if enc is not None:
-                return enc
-        raise AttributeError(
-            "Could not find encoder inside SemanticSegmentationTask. "
-            "Tried: model.model.encoder, model.model.backbone, "
-            "model.model.encoder_backbone. "
-            "Please set the correct attribute path in BOLPModule._get_encoder()."
-        )
-
-    @staticmethod
-    def _extract_patch_tokens(
-        encoder,
-        images: torch.Tensor,
-    ) -> torch.Tensor:
-        """
-        Run encoder forward and extract patch token embeddings.
-        Returns mean-pooled token vector per image: (B, d).
-
-        Prithvi ViT returns a list/tuple of feature maps or a tensor.
-        We handle both cases.
-        """
-        with torch.no_grad():
-            out = encoder(images)
-
-        # terratorch Prithvi returns a list of tensors from intermediate layers
-        # The last element is the final encoder output
-        if isinstance(out, (list, tuple)):
-            tokens = out[-1]   # (B, N_tokens, d)  or  (B, d, H, W)
-        else:
-            tokens = out
-
-        if tokens.dim() == 4:
-            # spatial feature map (B, d, H, W) → mean pool
-            return tokens.flatten(2).mean(dim=2)   # (B, d)
-        elif tokens.dim() == 3:
-            # token sequence (B, N, d) → mean pool over tokens
-            return tokens.mean(dim=1)              # (B, d)
-        elif tokens.dim() == 2:
-            return tokens                          # already (B, d)
-        else:
-            raise ValueError(f"Unexpected encoder output shape: {tokens.shape}")
-
-    # ── Phase A ──────────────────────────────────────────────────────────────
-
-    def fit(
-        self,
-        model:      SemanticSegmentationTask,
-        dataloader: DataLoader,
-        tile_info:  dict,
-    ) -> None:
-        """
-        Precompute biome centroids and projection matrix P from training set.
-        Call this ONCE before trainer.fit().
-        """
-        print("[BOLP] Phase A: extracting frozen encoder features...")
-        encoder = self._get_encoder(model)
-        encoder.eval()
-
-        group_features: dict[str, list[torch.Tensor]] = defaultdict(list)
-
-        for batch in dataloader:
-            images    = batch["image"].to(self.device)
-            filenames = batch["filename"]
-
-            pooled = self._extract_patch_tokens(encoder, images)  # (B, d)
-
-            for i, tile_id in enumerate(filenames):
-                group = tile_id_to_macro_group(str(tile_id), tile_info)
-                if group is not None:
-                    group_features[group].append(pooled[i].cpu())
-
-        if not group_features:
-            raise RuntimeError(
-                "[BOLP] No samples with known biome groups found in training set. "
-                "Check tile_info.json and BIOME_MACRO_GROUPS mapping."
-            )
-
-        # biome centroids
-        self.mu = {
-            g: torch.stack(feats).mean(0).to(self.device)
-            for g, feats in group_features.items()
-        }
-        self.mu0 = torch.stack(list(self.mu.values())).mean(0).to(self.device)
-
-        # M matrix: columns = µ_b - µ_0  → shape (d, |B|)
-        d = self.mu0.shape[0]
-        M = torch.stack(
-            [self.mu[g] - self.mu0 for g in sorted(self.mu.keys())],
-            dim=1,
-        )  # (d, |B|)
-
-        # thin SVD
-        U, S, Vh = torch.linalg.svd(M, full_matrices=False)
-        k = min(self.k, U.shape[1])
-        Uk = U[:, :k]  # (d, k)
-
-        # projection matrix P = I - U_k U_k^T
-        self.P = torch.eye(d, device=self.device) - Uk @ Uk.T  # (d, d)
-        self._fitted = True
-
-        print(f"[BOLP] Fitted on {len(group_features)} biome groups:")
-        for g in sorted(group_features.keys()):
-            print(f"  {g:<45}  n={len(group_features[g])}")
-        print(f"[BOLP] Projection rank k={k}, feature dim d={d}")
-
-    # ── Phase B ──────────────────────────────────────────────────────────────
-
-    def project_tokens(
-        self,
-        tokens:     torch.Tensor,    # (B, N, d) or (B, d, H, W) or (B, d)
-        tile_ids:   list[str],
-        tile_info:  dict,
-    ) -> torch.Tensor:
-        """
-        Apply BOLP to a batch of encoder token sequences.
-        Works for both token sequences (3D) and spatial maps (4D).
-        """
-        assert self._fitted, "Call BOLPModule.fit() before using project_tokens()."
-
-        original_shape = tokens.shape
-        is_spatial = tokens.dim() == 4  # (B, d, H, W)
-
-        if is_spatial:
-            B, d, H, W = tokens.shape
-            tokens = tokens.permute(0, 2, 3, 1).reshape(B, H * W, d)  # (B, HW, d)
-        elif tokens.dim() == 2:
-            tokens = tokens.unsqueeze(1)  # (B, 1, d)
-
-        B, N, d = tokens.shape
-
-        # Step 1: residualize — subtract biome centroid, add global mean (image-level)
-        for i, tile_id in enumerate(tile_ids):
-            group = tile_id_to_macro_group(str(tile_id), tile_info)
-            if group is not None and group in self.mu:
-                tokens[i] = tokens[i] - self.mu[group] + self.mu0
-            # if group unknown: skip residualization, still apply projection below
-
-        # Step 2: null-space projection — apply P to each token vector
-        # tokens: (B, N, d),  P: (d, d)
-        # z_hat = z @ P.T  (since P is symmetric, P.T = P, but keep general)
-        tokens_proj = tokens @ self.P.T  # (B, N, d)
-
-        if is_spatial:
-            tokens_proj = tokens_proj.reshape(B, H, W, d).permute(0, 3, 1, 2)
-        elif original_shape.dim() == 2 if hasattr(original_shape, 'dim') else len(original_shape) == 2:
-            tokens_proj = tokens_proj.squeeze(1)
-
-        return tokens_proj
-
-    def forward_with_bolp(
-        self,
-        model:      SemanticSegmentationTask,
-        images:     torch.Tensor,
-        tile_ids:   list[str] | None = None,
-        tile_info:  dict | None = None,
-    ) -> torch.Tensor:
-        """
-        Full BOLP forward pass for evaluation / inference.
-        Uses a hook to intercept encoder output, project it, then continue
-        through neck + decoder + head.
-
-        Returns logits (B, num_classes, H, W).
-        """
-        assert self._fitted, "Call BOLPModule.fit() before inference."
-
-        if tile_ids is None:
-            # no residualization possible — still apply projection
-            tile_ids = [None] * images.size(0)
-        if tile_info is None:
-            tile_info = {}
-
-        encoder = self._get_encoder(model)
-        inner_model = getattr(model, "model", model)
-
-        # We hook the encoder output and project before it reaches the decoder
-        projected_storage: list[torch.Tensor] = []
-
-        def _hook(module, input, output):
-            if isinstance(output, (list, tuple)):
-                # project the last element (final encoder features)
-                out_list = list(output)
-                last = out_list[-1]
-                if last.dim() == 3:
-                    # token sequence (B, N, d)
-                    projected = self.project_tokens(
-                        last.clone(), tile_ids, tile_info or {}
-                    )
-                elif last.dim() == 4:
-                    projected = self.project_tokens(
-                        last.clone(), tile_ids, tile_info or {}
-                    )
-                else:
-                    projected = last
-                out_list[-1] = projected
-                projected_storage.append(projected)
-                return type(output)(out_list) if isinstance(output, tuple) else out_list
-            elif isinstance(output, torch.Tensor):
-                projected = self.project_tokens(
-                    output.clone(), tile_ids, tile_info or {}
-                )
-                projected_storage.append(projected)
-                return projected
-
-        handle = encoder.register_forward_hook(_hook)
-        try:
-            result = inner_model(images)
-            logits = result.output if hasattr(result, "output") else result
-        finally:
-            handle.remove()
-
-        return logits
+class BOLPModule(PrithviFinalLayerBOLP):
+    def __init__(self, k=None, device=torch.device("cpu")):
+        super().__init__(k=k, device=device, tile_lookup=tile_id_to_macro_group)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 12. BOLP TRAINING STEP WRAPPER
 # ─────────────────────────────────────────────────────────────────────────────
 
-class BOLPSemanticSegmentationTask(SemanticSegmentationTask):
+class BOLPSemanticSegmentationTask(MethodTrainingMixin, SemanticSegmentationTask):
     """
     Thin subclass that injects the BOLP hook during training_step, validation_step,
     and test_step so the projected features flow through the decoder.
@@ -1098,31 +715,8 @@ class BOLPSemanticSegmentationTask(SemanticSegmentationTask):
             self, images, tile_ids=filenames, tile_info=self.tile_info
         )
 
-    def training_step(self, batch, batch_idx):
-        masks  = batch["mask"].squeeze(1)
-        logits = self._bolp_forward(batch)
-        loss   = F.cross_entropy(logits, masks, ignore_index=-1)
-        self.train_metrics.update(logits.argmax(dim=1), masks)
-        self.log("train/loss", loss, on_step=True, on_epoch=True,
-                 prog_bar=True, batch_size=logits.size(0))
-        return loss
 
-    def validation_step(self, batch, batch_idx):
-        masks  = batch["mask"].squeeze(1)
-        logits = self._bolp_forward(batch)
-        loss   = F.cross_entropy(logits, masks, ignore_index=-1)
-        preds  = logits.argmax(dim=1)
-        self.val_metrics.update(preds, masks)
-        self.log("val/loss", loss, prog_bar=True, batch_size=logits.size(0))
-        return loss
 
-    def test_step(self, batch, batch_idx):
-        masks  = batch["mask"].squeeze(1)
-        logits = self._bolp_forward(batch)
-        loss   = F.cross_entropy(logits, masks, ignore_index=-1)
-        self.log("test/loss", loss, batch_size=logits.size(0))
-        self.test_metrics[0].update(logits.argmax(dim=1), masks)
-        return loss
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1234,7 +828,7 @@ def build_model(
             use_dbr      = True,
         )
     else:
-        return SemanticSegmentationTask(**common_kwargs)
+        return ProtocolSemanticSegmentationTask(**common_kwargs)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1359,7 +953,7 @@ def evaluate_biome_metrics_csv(
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         writer.writeheader()
         writer.writerows(rows)
-    json_path.write_text(json.dumps(rows, indent=2), encoding="utf-8")
+    write_json(json_path, rows)
 
     print("\nFinal test metrics by macro biome group:")
     print(f"{'group':<45}  {'samples':>7}  {'pix_acc':>9}  {'mIoU':>6}  {'mIoU_micro':>10}")
@@ -1489,9 +1083,9 @@ def main() -> None:
 
     # ── validate CONFIG switches ──
     active_modes = sum([USE_NORMAL_LP, USE_DBR, USE_BOLP])
-    
+
     args = parse_args()
-    
+
     mode_tag = (
         "normal_lp" if USE_NORMAL_LP
         else f"dbr_alpha{DBR_ALPHA}_ema{DBR_EMA}" if USE_DBR
@@ -1542,6 +1136,8 @@ def main() -> None:
     # ── datamodule ──
     datamodule = build_datamodule(args)
     datamodule.setup("fit")
+    datamodule.train_dataset, protocol_groups = known_training_dataset(datamodule.train_dataset, lambda sid: tile_id_to_macro_group(sid, tile_info))
+    datamodule.known_training_ids = tuple(protocol_groups)
     datamodule.setup("test")
 
     val_loader  = datamodule.val_dataloader()
@@ -1557,13 +1153,6 @@ def main() -> None:
     reweighter  = None
     bolp_module = None
 
-    if USE_DBR:
-        train_groups = collect_train_biome_groups(datamodule, tile_info)
-        reweighter   = DynamicBiomeReweighter(
-            train_biome_groups = train_groups,
-            alpha = args.dbr_alpha,
-            ema   = args.dbr_ema,
-        )
 
     if USE_BOLP:
         bolp_module = BOLPModule(k=args.bolp_k, device=device)
@@ -1578,6 +1167,9 @@ def main() -> None:
         tile_info    = tile_info,
         bolp_module  = bolp_module,
     )
+    configure_training_protocol(model, 'erm', 'mmearth', protocol_groups, args, ignore_index=-1, lookup=lambda sid: tile_id_to_macro_group(sid, tile_info))
+    args.method_protocol = model.method_protocol.config
+    record_config(out_dir, __file__, args)
     model.strict_loading = False
 
     # ── BOLP Phase A: fit projection matrix ──
@@ -1588,6 +1180,8 @@ def main() -> None:
             dataloader = datamodule.train_dataloader(),
             tile_info  = tile_info,
         )
+        update_projection_protocol(model, args)
+        record_config(out_dir, __file__, args)
 
     # ── callbacks ──
     callbacks: list[Callback] = [
@@ -1620,6 +1214,7 @@ def main() -> None:
     # per-epoch JSON metrics saver (also feeds val_biome_metrics to DBR)
     epoch_metrics_cb = EpochMetricsSaverCallback(
         val_loader   = val_loader,
+        test_loader  = test_loader,
         tile_info    = tile_info,
         num_classes  = num_classes,
         out_dir      = out_dir,
@@ -1629,13 +1224,6 @@ def main() -> None:
     )
     callbacks.append(epoch_metrics_cb)
 
-    if USE_DBR and reweighter is not None:
-        callbacks.append(
-            DBRWeightUpdateCallback(
-                reweighter   = reweighter,
-                update_every = args.dbr_ema and DBR_UPDATE_EVERY or DBR_UPDATE_EVERY,
-            )
-        )
 
     # ── trainer ──
     trainer = pl.Trainer(
@@ -1690,12 +1278,15 @@ def main() -> None:
         selected_test_metrics = evaluate_split(
             model, test_loader, tile_info, num_classes, device,
             ignore_index=-1, bolp_module=bolp_module,
+            epoch=int(torch.load(test_ckpt, map_location="cpu", weights_only=False).get("epoch", -1)) if test_ckpt else -1,
+            label="test", bootstrap_replicates=1000,
         )
-        (out_dir / "test_selected.json").write_text(json.dumps({
+        write_json(out_dir / "test_selected.json", {
             "checkpoint": str(test_ckpt) if test_ckpt else None,
+            "checkpoint_epoch": selected_test_metrics["epoch"],
             "selection": "validation checkpoint",
             "metrics": selected_test_metrics,
-        }, indent=2))
+        })
 
         if not args.skip_biome_metrics:
             evaluate_biome_metrics_csv(
@@ -1719,7 +1310,7 @@ if __name__ == "__main__":
     #   USE_NORMAL_LP = True
     #   USE_DBR       = False
     #   USE_BOLP      = False
-    
+
     # python train_mmearth_dynamic_world_prithvi_super.py \
     #     --data-root "/data1/aminur/om/MMearth20k/hardcoded" \
     #     --out-dir "/data1/aminur/om/MMearth20k/output" \

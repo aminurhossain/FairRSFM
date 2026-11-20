@@ -16,6 +16,7 @@ Usage:
 # ─────────────────────────────────────────────────────────────────────────────
 # 0. SYSTEM SETUP  ── PASTE FROM LP TRAIN FILE ──
 # ─────────────────────────────────────────────────────────────────────────────
+from fairrsfm.training.protocol import (MethodTrainingMixin, known_training_dataset, lookup_biome, training_loader, configure_training_protocol, dataset_sample_ids, balanced_group_loader, forward_with_sample_ids)
 import os
 import ctypes
 try:
@@ -119,6 +120,8 @@ while ROOT_DIR.parent != ROOT_DIR:
         break
     ROOT_DIR = ROOT_DIR.parent
 BASE_DIR = ROOT_DIR
+from fairrsfm.training.reporting import report_epoch, evaluating, macro_f1_present, write_json, finalize_selected, record_config
+from fairrsfm.evaluation.serialization import json_safe
 # ── Dynamic Dataset Directory Resolution ──
 DATA_DIR = None
 for _candidate in [
@@ -171,7 +174,7 @@ SEED         = 42
 NUM_WORKERS  = 16
 
 # ── Early stopping ──
-EARLY_STOP_PATIENCE  = 15
+EARLY_STOP_PATIENCE  = 1000
 EARLY_STOP_MIN_DELTA = 1e-4
 
 # ── Neck indices for prithvi_eo_v2_300 ──
@@ -500,159 +503,35 @@ class BiomeMIoULogger(Callback):
 
     def _compute_and_log(self, biome_data, epoch, tb, tb_prefix, label, pl_module=None):
         # Exclude Unknown from all metrics completely
-        biome_data = {b: d for b, d in biome_data.items() if b != "Unknown"}
-        if not biome_data:
-            print(f"\n  Biome metrics [{label}] — epoch {epoch}: No known biomes found!")
-            return
-
-        print(f"\n{'═'*70}")
-        print(f"  Biome metrics [{label}] — epoch {epoch}")
-        print(f"{'═'*70}")
-        print(f"\n  ── Per-biome mIoU & ECE Calibration ───────────────────────")
-        print(f"  {'Biome':<44}  {'mIoU':>8}  {'ECE':>7}")
-        print(f"  {'─'*44}  {'─'*8}  {'─'*7}")
-
-        biome_ious   = {}
-        biome_eces   = {}
-        biome_counts = {}
-        biome_f1s    = {}
-        for biome in sorted(biome_data.keys()):
-            d      = biome_data[biome]
-            n      = len(d["true"])
-            y_true = np.concatenate(d["true"])
-            y_pred = np.concatenate(d["pred"])
-            probs  = np.concatenate(d["probs"])
-            miou   = compute_miou(y_true, y_pred, self.num_classes, self.ignore_index)
-            ece    = compute_ece_seg(y_true, probs.max(axis=-1), y_pred, self.ignore_index)
-            f1     = compute_macro_f1_seg(y_true, y_pred, self.num_classes, self.ignore_index)
-            biome_ious[biome]   = float(miou) if not np.isnan(miou) else None
-            biome_eces[biome]   = float(ece) if not np.isnan(ece) else None
-            biome_f1s[biome]    = float(f1) if not np.isnan(f1) else None
-            biome_counts[biome] = int(n)
-            print(f"  {biome:<44}  {miou:>8.3f}  {ece:>7.4f}")
-            bk = biome.replace(" ","_").replace("&","and").replace(",","")
-            if tb:
-                tb.add_scalar(f"{tb_prefix}/miou/{bk}", miou, epoch)
-                tb.add_scalar(f"{tb_prefix}/ece/{bk}",  ece,  epoch)
-
-        # Fairness & Equity Block
-        valid_ious = [v for v in biome_ious.values() if v is not None and not np.isnan(v)]
-        valid_eces = [v for v in biome_eces.values() if v is not None and not np.isnan(v)]
-
-        all_y_true = np.concatenate([np.concatenate(d["true"]) for d in biome_data.values()])
-        all_y_pred = np.concatenate([np.concatenate(d["pred"]) for d in biome_data.values()])
-        overall_miou = float(compute_miou(all_y_true, all_y_pred, self.num_classes, self.ignore_index))
-
-        if len(valid_ious) >= 2:
-            worst_miou = float(np.min(valid_ious))
-            best_miou  = float(np.max(valid_ious))
-            mean_miou  = float(np.mean(valid_ious))
-            std_miou   = float((np.std(valid_ious, ddof=1) if len(valid_ious) > 1 else 0.0))
-            per_ratio  = float(worst_miou / best_miou) if best_miou > 0 else None
-            gini_coef  = compute_gini(valid_ious)
-            nfr        = float((best_miou - worst_miou) / np.mean(valid_ious)) if np.mean(valid_ious) > 0 else float("nan")
-        else:
-            worst_miou = best_miou = mean_miou = std_miou = per_ratio = gini_coef = nfr = None
-
-        if len(valid_eces) >= 2:
-            min_ece       = float(np.min(valid_eces))
-            max_ece       = float(np.max(valid_eces))
-            ece_disparity = float(max_ece - min_ece)
-        else:
-            ece_disparity = None
-
-        eq_odds = compute_eqodds_seg(biome_data, self.num_classes, self.ignore_index)
-        dpm = compute_dpm_seg(biome_data, self.num_classes, self.ignore_index)
-
-        # Log worst_case_miou to Lightning module for ModelCheckpoint monitoring
-        if pl_module is not None and label == "val" and worst_miou is not None:
-            pl_module.log("val/worst_case_miou", worst_miou,
-                          on_step=False, on_epoch=True, sync_dist=True)
-
-        print(f"\n  ── Representational Fairness & Disparity ─────────────────")
-        print(f"  {'Overall Test mIoU':<42}  {overall_miou:.4f}")
-        print(f"  {'Worst-case mIoU':<42}  {worst_miou if worst_miou is not None else float('nan'):.4f}")
-        print(f"  {'Best-case mIoU':<42}  {best_miou if best_miou is not None else float('nan'):.4f}")
-        print(f"  {'Performance Equity Ratio (Worst/Best)':<42}  {per_ratio if per_ratio is not None else float('nan'):.4f}")
-        print(f"  {'Gini Coefficient (Inequality)':<42}  {gini_coef if gini_coef is not None else float('nan'):.4f}")
-        print(f"  {'NFR (Normalized Fairness Range)':<42}  {nfr if nfr is not None else float('nan'):.4f}")
-        print(f"  {'EqOdds (Equalized Odds Disp)':<42}  {eq_odds if not np.isnan(eq_odds) else float('nan'):.4f}")
-        print(f"  {'DPM (Demographic Parity Metric)':<42}  {dpm if not np.isnan(dpm) else float('nan'):.4f}")
-        print(f"  {'ECE Disparity (Max-Min ECE)':<42}  {ece_disparity if ece_disparity is not None else float('nan'):.4f}")
-        print(f"  {'Biome mIoU Std':<42}  {std_miou if std_miou is not None else float('nan'):.4f}")
-
-        if tb:
-            if worst_miou is not None:    tb.add_scalar(f"{tb_prefix}/fairness/worst_miou", worst_miou, epoch)
-            if best_miou is not None:     tb.add_scalar(f"{tb_prefix}/fairness/best_miou",  best_miou,  epoch)
-            if per_ratio is not None:     tb.add_scalar(f"{tb_prefix}/fairness/PER",        per_ratio,  epoch)
-            if gini_coef is not None:     tb.add_scalar(f"{tb_prefix}/fairness/Gini",       gini_coef,  epoch)
-            if nfr is not None:           tb.add_scalar(f"{tb_prefix}/fairness/NFR",        nfr,        epoch)
-            if ece_disparity is not None: tb.add_scalar(f"{tb_prefix}/fairness/ECE_disp",  ece_disparity, epoch)
-            if std_miou is not None:      tb.add_scalar(f"{tb_prefix}/fairness/IoU_std",    std_miou,   epoch)
-
-        print(f"{'═'*70}\n")
-
-        # Save unified JSON result per split
-        results_payload = {
-            "epoch": epoch,
-            "split": label,
-            "overall_miou": overall_miou,
-            "worst_case_miou": worst_miou,
-            "best_case_miou": best_miou,
-            "performance_equity_ratio": per_ratio,
-            "gini_coefficient": gini_coef,
-            "normalized_fairness_range": nfr,
-            "ece_disparity": ece_disparity,
-            "iou_std": std_miou,
-            "equalized_odds_disparity": eq_odds if not np.isnan(eq_odds) else None,
-            "demographic_parity_disparity": dpm if not np.isnan(dpm) else None,
-            "per_biome_miou": biome_ious,
-            "per_biome_ece": biome_eces,
-            "per_biome_macro_f1": biome_f1s,
-            "per_biome_sample_counts": biome_counts,
-        }
-
-        if label == "test":
-            self.test_history.append(results_payload)
-            json_file = self.output_dir / "test_results.json"
-            with open(json_file, "w", encoding="utf-8") as f:
-                json.dump(self.test_history, f, indent=2)
-        else:
-            self.val_history.append(results_payload)
-            json_file = self.output_dir / "val_results.json"
-            with open(json_file, "w", encoding="utf-8") as f:
-                json.dump(self.val_history, f, indent=2)
-
-        print(f"  [JSON] Results updated in {json_file}")
+        return report_epoch(self, biome_data, epoch, tb, tb_prefix, label, pl_module, task="sa_crop", ignore_index=getattr(self, "ignore_index", IGNORE_INDEX))
 
     def _eval_test_split_and_log(self, trainer, pl_module, epoch, tb):
-        was_training = pl_module.training
-        pl_module.eval()
-        device = pl_module.device
-        store  = defaultdict(lambda: {"true": [], "pred": [], "probs": []})
+        with evaluating(pl_module):
+            was_training = pl_module.training
+            pl_module.eval()
+            device = pl_module.device
+            store  = defaultdict(lambda: {"true": [], "pred": [], "probs": []})
 
-        with torch.no_grad():
-            for batch in self.test_loader:
-                x, masks, sample_ids = batch
-                x     = x.to(device)
-                masks = masks.to(device)
-                logits = pl_module(x)
-                probs  = torch.softmax(logits.float(), dim=1).permute(0, 2, 3, 1).cpu().numpy()
-                preds  = probs.argmax(axis=-1)
-                masks  = masks.cpu().numpy()
+            with torch.no_grad():
+                for batch in self.test_loader:
+                    x, masks, sample_ids = batch
+                    x     = x.to(device)
+                    masks = masks.to(device)
+                    logits = forward_with_sample_ids(pl_module, x, sample_ids)
+                    probs  = torch.softmax(logits.float(), dim=1).permute(0, 2, 3, 1).cpu().numpy()
+                    preds  = probs.argmax(axis=-1)
+                    masks  = masks.cpu().numpy()
 
-                for i, sid in enumerate(sample_ids):
-                    biome = (self.biome_map.get(sid)
-                             or self.biome_map.get(Path(sid).stem, "Unknown"))
-                    if biome == "Unknown":
-                        continue
-                    store[biome]["true"].append(masks[i].reshape(-1))
-                    store[biome]["pred"].append(preds[i].reshape(-1))
-                    store[biome]["probs"].append(probs[i].reshape(-1, self.num_classes))
+                    for i, sid in enumerate(sample_ids):
+                        biome = (self.biome_map.get(sid)
+                                 or self.biome_map.get(Path(sid).stem, "Unknown"))
+                        store[biome]["true"].append(masks[i].reshape(-1))
+                        store[biome]["pred"].append(preds[i].reshape(-1))
+                        store[biome]["probs"].append(probs[i].reshape(-1, self.num_classes))
 
-        self._compute_and_log(store, epoch, tb, "biome_metrics_test", "test")
-        if was_training:
-            pl_module.train()
+            self._compute_and_log(store, epoch, tb, "biome_metrics_test", "test")
+            if was_training:
+                pl_module.train()
 
     def on_validation_epoch_start(self, trainer, pl_module):
         pl_module._biome_orig = defaultdict(lambda: {"true":[],"pred":[],"probs":[]})
@@ -673,8 +552,6 @@ class BiomeMIoULogger(Callback):
         for i, sid in enumerate(sample_ids):
             biome = (self.biome_map.get(sid)
                      or self.biome_map.get(Path(sid).stem, "Unknown"))
-            if biome == "Unknown":
-                continue   # Exclude Unknown completely from evaluation
             store[biome]["true"].append(masks[i].reshape(-1))
             store[biome]["pred"].append(preds[i].reshape(-1))
             store[biome]["probs"].append(probs[i].reshape(-1, self.num_classes))
@@ -684,7 +561,7 @@ class BiomeMIoULogger(Callback):
             return
         epoch = trainer.current_epoch
         tb    = trainer.logger.experiment if hasattr(trainer.logger, "experiment") else None
-        
+
         # 1. Compute & save validation metrics to val_results.json
         if pl_module._biome_orig:
             self._compute_and_log(pl_module._biome_orig, epoch, tb,
@@ -714,8 +591,6 @@ class BiomeMIoULogger(Callback):
         for i, sid in enumerate(sample_ids):
             biome = (self.biome_map.get(sid)
                      or self.biome_map.get(Path(sid).stem, "Unknown"))
-            if biome == "Unknown":
-                continue   # Exclude Unknown completely from evaluation
             store[biome]["true"].append(masks[i].reshape(-1))
             store[biome]["pred"].append(preds[i].reshape(-1))
             store[biome]["probs"].append(probs[i].reshape(-1, self.num_classes))
@@ -754,27 +629,17 @@ def load_biome_map(json_path: Path) -> dict:
     return biome_map
 
 def print_split_biome_distribution(split_name: str, dataset, biome_map: dict):
-    raw = dataset.dataset if hasattr(dataset, "dataset") else dataset
-    total = len(raw)
     counts = defaultdict(int)
-    for idx in range(total):
-        sid = str(raw[idx].sample_name)
-        biome = biome_map.get(sid) or biome_map.get(Path(sid).stem, "Unknown")
-        counts[biome] += 1
-
-    print(f"\n  [{split_name.upper()} Split] Total samples: {total}")
-    for b in sorted(counts.keys()):
-        if b == "Unknown":
-            print(f"    • {b:<45}: {counts[b]:>5} (excluded from metrics)")
-        else:
-            print(f"    • {b:<45}: {counts[b]:>5}")
+    for sid in dataset_sample_ids(dataset):
+        counts[lookup_biome(biome_map, sid)] += 1
+    print(f"[{split_name}] {dict(counts)}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 9. LIGHTNING MODULE
 # ─────────────────────────────────────────────────────────────────────────────
 
-class SegLinearProbe(L.LightningModule):
+class SegLinearProbe(MethodTrainingMixin, L.LightningModule):
     """
     Owns the model directly (no terratorch task wrapper) to avoid
     self.log control-flow issues.
@@ -834,39 +699,8 @@ class SegLinearProbe(L.LightningModule):
         out = self.model(x)
         return out.output if hasattr(out, "output") else out   # (B, C, H, W)
 
-    def training_step(self, batch, batch_idx):
-        x, masks, _ = batch
-        self.model.encoder.eval()
-        logits = self(x)                                       # (B, C, H, W)
-        loss   = self.loss_fn(logits, masks)
-        preds  = logits.argmax(dim=1)
-        self.train_miou.update(preds, masks)
-        self.log("train/loss",  loss,             prog_bar=True,
-                 on_step=True, on_epoch=True, batch_size=x.size(0))
-        self.log("train/miou",  self.train_miou,  prog_bar=False,
-                 on_step=False, on_epoch=True, batch_size=x.size(0))
-        return loss
 
-    def validation_step(self, batch, batch_idx, dataloader_idx=0):
-        x, masks, sample_ids = batch
-        logits = self(x)
-        loss   = self.loss_fn(logits, masks)
-        preds  = logits.argmax(dim=1)
-        self.log("val/loss", loss, prog_bar=False,
-                 add_dataloader_idx=False, batch_size=x.size(0))
-        self.val_miou.update(preds, masks)
-        self.log("val/miou_online", self.val_miou,
-                 prog_bar=False, add_dataloader_idx=False,
-                 on_step=False, on_epoch=True, batch_size=x.size(0))
-        # return logits + masks + sample_ids for callbacks
-        return {"logits": logits, "masks": masks, "sample_ids": sample_ids}
 
-    def test_step(self, batch, batch_idx, dataloader_idx=0):
-        x, masks, sample_ids = batch
-        logits = self(x)
-        loss   = self.loss_fn(logits, masks)
-        self.log("test/loss", loss, add_dataloader_idx=False, batch_size=x.size(0))
-        return {"logits": logits, "masks": masks, "sample_ids": sample_ids}
 
     def configure_optimizers(self):
         trainable = [p for p in self.model.parameters() if p.requires_grad]
@@ -914,6 +748,7 @@ def build_model(weights_path: Path, num_classes: int):
 
 def main():
 
+    global BATCH_SIZE
     import logging
     import argparse
     logging.getLogger("lightning.pytorch").setLevel(logging.WARNING)
@@ -924,7 +759,11 @@ def main():
     parser.add_argument("--gpu", type=str, default="0", help="CUDA GPU device ID (default: 0)")
     parser.add_argument("--out-dir", type=str, default=None, help="Custom output directory")
     parser.add_argument("--resume-from", type=str, default=None, help="Path to checkpoint to resume training from")
+    parser.add_argument("--batch-size", type=int, default=BATCH_SIZE, help="Images per batch")
     args = parser.parse_args()
+    if args.batch_size < 1:
+        parser.error("--batch-size must be positive")
+    BATCH_SIZE = args.batch_size
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
     seed = args.seed
@@ -982,6 +821,7 @@ def main():
 
     # ── Datasets ──
     train_ds = GeoBenchSegDataset(task, "train", augment=True)
+    train_ds, protocol_groups = known_training_dataset(train_ds, lambda sid: lookup_biome(biome_map, sid))
     val_ds   = GeoBenchSegDataset(task, "valid", augment=False)
     test_ds  = GeoBenchSegDataset(task, "test",  augment=False)
 
@@ -994,7 +834,7 @@ def main():
     print("══════════════════════════════════════════════════════════════════════\n")
 
     # ── DataLoaders ──
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE,
+    train_loader = training_loader(train_ds, method='erm', groups=protocol_groups, batch_size=BATCH_SIZE,
                               shuffle=True,  num_workers=NUM_WORKERS,
                               pin_memory=True, persistent_workers=True)
     val_loader   = DataLoader(val_ds,   batch_size=BATCH_SIZE,
@@ -1015,6 +855,8 @@ def main():
         ignore_index  = IGNORE_INDEX,
         class_weights = CLASS_WEIGHTS,
     )
+    configure_training_protocol(lp_model, 'erm', 'sa_crop', protocol_groups, args, ignore_index=IGNORE_INDEX, lookup=lambda sid: lookup_biome(biome_map, sid))
+    args.method_protocol = lp_model.method_protocol.config
 
     # ── Separate Checkpoint Subdirectories ──
     CKPT_MACRO_DIR = CKPT_DIR / "best_macro_miou"
@@ -1025,10 +867,10 @@ def main():
     # ── Dual Checkpoint Callbacks ──
     # 1. Top 3 Best Macro mIoU Checkpoints
     ckpt_macro_cb = ModelCheckpoint(
-        monitor                 = "val/miou",
+        monitor                 = 'val/benchmark_miou',
         mode                    = "max",
         dirpath                 = CKPT_MACRO_DIR,
-        filename                = f"{mode_str}-macro-epoch={{epoch:02d}}-val_miou={{val/miou:.4f}}",
+        filename                = f"{mode_str}-macro-epoch={{epoch:02d}}-val_miou={{val/benchmark_miou:.4f}}",
         auto_insert_metric_name = False,
         save_top_k              = 3,
         save_last               = True,
@@ -1091,29 +933,10 @@ def main():
         num_sanity_val_steps    = 2,
     )
 
+    record_config(OUT_DIR, __file__, args)
     trainer.fit(lp_model, train_loader, val_loader, ckpt_path=args.resume_from)
+    finalize_selected(trainer, lp_model)
 
-    print(f"\n[Done] Best Macro mIoU Checkpoint : {ckpt_macro_cb.best_model_path}")
-    print(f"[Done] Best Macro mIoU Score      : {ckpt_macro_cb.best_model_score:.4f}")
-    if ckpt_worst_cb.best_model_path:
-        print(f"[Done] Best Worst-Case Checkpoint : {ckpt_worst_cb.best_model_path}")
-        print(f"[Done] Best Worst-Case Score      : {ckpt_worst_cb.best_model_score:.4f}")
-
-    # ── Test Evaluation on Best Macro mIoU Checkpoint ──
-    # Lightning restores callback state during test; retain both fitted paths.
-    selected_macro_path = ckpt_macro_cb.best_model_path
-    selected_worst_path = ckpt_worst_cb.best_model_path
-    print("\n[Test] Running evaluation on Best Macro mIoU Checkpoint...")
-    trainer.test(lp_model, test_loader, ckpt_path=selected_macro_path)
-    if not biome_cb.test_history:
-        raise RuntimeError("Selected checkpoint produced no test biome metrics")
-    (OUT_DIR / "test_selected.json").write_text(json.dumps({
-        "checkpoint": selected_macro_path,
-        "selection": "best validation macro mIoU",
-        "metrics": biome_cb.test_history[-1],
-    }, indent=2))
-
-    # ── Save trainable weights (decoder + head only) ──
     ckpt_path = CKPT_DIR / f"{mode_str}_weights.pt"
     torch.save({
         "decoder"        : lp_model.model.decoder.state_dict(),
@@ -1125,11 +948,6 @@ def main():
         "num_frames"     : NUM_FRAMES,
         "freeze_backbone": True,
     }, ckpt_path)
-    print(f"[Done] Trainable weights saved: {ckpt_path}")
-    # Export above belongs to the primary, validation-selected checkpoint.
-    if selected_worst_path:
-        print("\n[Test] Running evaluation on Best Worst-Case Biome mIoU Checkpoint...")
-        trainer.test(lp_model, test_loader, ckpt_path=selected_worst_path)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

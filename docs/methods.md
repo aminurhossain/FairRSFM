@@ -16,16 +16,27 @@ $$
 z_i = \phi(x_i) \in \mathbb{R}^{d}.
 $$
 
-Every method keeps `phi` fixed and trains only the downstream head `h_theta`. The task loss is cross-entropy for single-label classification, binary cross-entropy for multi-label classification, and a decoder-level loss for segmentation.
+Every method keeps `phi` fixed and trains only the downstream head `h_theta`.
+The common per-image loss is cross-entropy for EuroSAT and binary
+cross-entropy averaged over labels for BigEarthNet. For segmentation, average
+cross-entropy over valid pixels within each patch, then average patches.
+Patches with no valid pixels contribute neither a task-loss observation nor
+a group-loss observation. These task-loss definitions apply to all four
+methods and every backbone.
+
+All four methods train on the same subset of training images with known biome
+labels. Validation and test retain all images: unknown-biome images count toward
+overall metrics but not group fairness summaries. The retained training IDs and
+group assignments are hashed in each run's configuration and checkpoint.
 
 ## Compared Strategies
 
 | Method | Stage | Data retained | Backbone updates | Additional trainable parameters |
 |---|---|---:|---:|---:|
-| ERM | Standard task objective | All | No | No |
-| DBR | Loss reweighting | All | No | No |
-| BOLP | Representation transformation | All | No | No |
-| GroupDRO | Group-robust objective | All | No | No |
+| ERM | Standard task objective | Known-biome training subset | No | No |
+| DBR | Loss reweighting | Known-biome training subset | No | No |
+| BOLP | Representation transformation | Known-biome training subset | No | No |
+| GroupDRO | Group-robust objective | Known-biome training subset | No | No |
 
 ## Empirical Risk Minimization
 
@@ -35,11 +46,15 @@ $$
 \mathcal{L}_{\mathrm{ERM}} = \frac{1}{N}\sum_{i=1}^{N}\ell(h_{\theta}(z_i), y_i).
 $$
 
-It does not use biome labels during optimization. Biome metadata is used only to compute group-wise evaluation metrics.
+After the common training subset is selected, ERM does not use biome labels in
+its objective or sampling.
 
 ## Dynamic Biome Reweighting
 
-Dynamic Biome Reweighting with Validation Feedback (DBR) is a loss-level mitigation method. It begins with inverse-frequency weights and adapts them using current validation performance.
+Dynamic Biome Reweighting (DBR) is a loss-level mitigation method. It begins
+with inverse-frequency group weights, then raises weights for groups with
+higher **training loss**. A per-group EMA smooths the loss signal. Validation
+and test metrics do not update the weights.
 
 Let `p_g = n_g / N` be the empirical frequency of group `g`. Initial normalized weights are
 
@@ -47,26 +62,31 @@ $$
 w_g^{(0)} = \frac{1/p_g}{\frac{1}{|\mathcal{G}|}\sum_{g'\in\mathcal{G}}1/p_{g'}}.
 $$
 
-At update step `t`, let `M_g^(t)` be the validation metric for group `g` and let
+At the end of epoch `t`, let `L_g^(t)` be the mean per-example task loss for
+group `g`. For segmentation, compute loss per patch over valid pixels, then
+average patches within each group. Smooth the group loss using
 
 $$
-\bar{M}^{(t)} = \frac{1}{|\mathcal{G}|}\sum_g M_g^{(t)}.
+\bar{L}_g^{(t)} = \beta \bar{L}_g^{(t-1)} + (1-\beta)L_g^{(t)}.
 $$
 
-DBR increases the weight of below-mean groups and decreases the weight of above-mean groups:
+Set the next epoch's unnormalized group weight proportional to smoothed loss:
 
 $$
-\tilde{w}^{(t+1)}_g = w^{(t)}_g
-\left(1 + \alpha \frac{\bar{M}^{(t)} - M_g^{(t)}}{\bar{M}^{(t)} + \epsilon}\right),
+\tilde{w}_g^{(t+1)} = (\bar{L}_g^{(t)} + \epsilon)^\alpha,
+\qquad
+w_g^{(t+1)} =
+\frac{\tilde{w}_g^{(t+1)}}
+{\frac{1}{|\mathcal{G}|}\sum_{g'}\tilde{w}_{g'}^{(t+1)}}.
 $$
 
-followed by unit-mean normalization,
-
-$$
-w^{(t+1)}_g =
-\frac{\tilde{w}^{(t+1)}_g}
-{\frac{1}{|\mathcal{G}|}\sum_{g'}\tilde{w}^{(t+1)}_{g'}}.
-$$
+Groups absent from an epoch retain their previous EMA loss. Unknown-biome
+samples are excluded from the common training subset. Initialize each group's EMA from its first observed
+training epoch. The cleaned benchmark uses `alpha=0.5`, `beta=0.9`, and updates
+weights once per epoch with `epsilon=1e-6` and no clipping. Checkpoints persist
+EMA losses, weights, partial-epoch sums/counts, and the last updated epoch.
+If validation checkpointing precedes the epoch-end update, resume completes
+that update before the next epoch's training batches.
 
 The training objective is
 
@@ -76,6 +96,9 @@ $$
 $$
 
 DBR is non-adversarial, parameter-free beyond the task head, and applicable to classification and segmentation.
+
+The source audit records the historical differences and the shared replacement
+in [`dbr-protocol-audit.md`](dbr-protocol-audit.md).
 
 ## Biome-Orthogonal Linear Probing
 
@@ -106,7 +129,7 @@ $$
 B = U\Sigma V^\top,
 $$
 
-the leading `k` left singular vectors `U_k` span the dominant inter-group directions. Since the columns of `B` sum to zero, at most `|G|-1` directions are non-trivial.
+the leading `k` left singular vectors `U_k` span the dominant inter-group directions. Since the columns of `B` sum to zero, at most `|G|-1` directions are non-trivial. The universal default is `k = min(|G|-1, d)`, with residual centering enabled. Any smaller rank is an explicitly labeled ablation.
 
 ### 4. Orthogonal projector
 
@@ -129,11 +152,40 @@ $$
 \frac{1}{N}\sum_i \ell(h_{\theta}(\hat{z}_i), y_i).
 $$
 
-The centroids, global mean, and projector are computed from training embeddings and frozen. If a group label is unavailable during inference, group residualization is skipped and the global projector is still applied.
+The centroids, global mean, and projector are computed from training embeddings
+and frozen. Only the **final encoder layer** is transformed. For encoders that
+return several feature layers, earlier layers pass to the decoder unchanged.
+Fit centroids from spatial/token means per image, giving each image equal
+weight within its group; apply the fitted centering and projector to every
+token or spatial position of the final layer during training, validation, and
+test. If a group label is unavailable during inference, group residualization
+is skipped and the global projector is still applied. Centroids and projector
+buffers, group order, rank, and residualization settings are checkpointed.
 
 ## GroupDRO
 
 GroupDRO is included as a group-robust optimization baseline. It emphasizes groups with higher loss so that training targets robust performance rather than average empirical risk. In FairRSFM it uses the same biome macro-groups, frozen encoder, task head, data, optimization budget, and checkpoint-selection protocol as the other methods.
+
+The algorithm follows the standard robust objective in Sagawa et al.'s
+[official implementation](https://github.com/kohpangwei/group_DRO/blob/master/loss.py).
+Initialize adversarial probabilities uniformly. At each training batch,
+calculate group mean task losses (zero for absent groups), update
+`q_g <- q_g * exp(eta * loss_g)` and normalize over all training groups, then
+compute `sum_g q_g * loss_g` using the updated probabilities. Use `eta=0.01`,
+zero generalization adjustment, no loss normalization, and the standard
+robust objective rather than its optional BTL variant. The official example
+commands use group-balanced sampling: each retained training image is sampled
+with weight `1/n_g`, with replacement, for `N` draws per epoch. The same known-
+biome training subset is used by all four methods. GroupDRO probabilities are
+checkpointed and validation/test forwards never update them.
+
+## Shared implementation
+
+The 48 canonical scripts and eight optional DOFA UPerNet variants use
+`src/fairrsfm/training/protocol.py` for training objectives and task losses, and
+`src/fairrsfm/methods/` for the method algorithms. Backbone adapters retain
+their heads and optimizer settings. Per-epoch validation **and test** reporting
+remain enabled; only validation selects checkpoints and BigEarthNet thresholds.
 
 ## Evaluation Metrics
 

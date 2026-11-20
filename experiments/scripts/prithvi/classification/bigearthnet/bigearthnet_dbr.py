@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
-"""
-Prithvi EO V2 300M — BigEarthNet Multi-Label Classification (DBR Method)
-========================================================================
-Key Features:
-  • Task: Multi-label Classification (m-bigearthnet, 43 classes, BCEWithLogitsLoss)
-  • Method: Distributionally Balanced Reweighting (DBR) with Macro Grouping (eurosat_biome_mapping.json)
-  • Unknowns Purged: Dataset strictly filters out samples without known biome mappings.
-  • Dynamic Weights: Updates group loss reweighting factors w_b dynamically based on validation Macro F1.
-  • Augmentations: Random horizontal/vertical flips active on train split.
-  • Slim Checkpoints: Strips frozen encoder weights (~2.5 MB per .ckpt file)
+"""Prithvi EO V2 300M — BigEarthNet Multi-Label Classification (DBR Method)
+
+Dynamic Biome Reweighting uses unweighted epoch group training losses,
+EMA beta=0.9, alpha=0.5, epsilon=1e-6, and mean-one weights.
+Initialize inverse group frequencies on the common known-biome training
+subset. Backbones stay frozen; validation and test run every epoch and
+do not update DBR. See docs/methods.md and fairrsfm.training.protocol.
 """
 
+from fairrsfm.training.protocol import (MethodTrainingMixin, known_training_dataset, lookup_biome, training_loader, configure_training_protocol, dataset_sample_ids, balanced_group_loader, forward_with_sample_ids)
 import sys
 import os
 import json
@@ -50,7 +48,7 @@ def compute_optimized_f1(y_true, probs, *args, **kwargs):
             if score > best_f1_c:
                 best_f1_c = score
                 best_thresholds[c] = th
-    
+
     y_pred = (probs > best_thresholds).astype(int)
     present = [c for c in range(num_classes) if y_true[:, c].sum() > 0]
     if not present:
@@ -125,6 +123,8 @@ while ROOT_DIR.parent != ROOT_DIR:
         break
     ROOT_DIR = ROOT_DIR.parent
 BASE_DIR = ROOT_DIR
+from fairrsfm.training.reporting import report_epoch, evaluating, macro_f1_present, write_json, finalize_selected, record_config
+from fairrsfm.evaluation.serialization import json_safe
 sys.path.insert(0, str(ROOT_DIR / "src"))
 from fairrsfm.evaluation.metrics import compute_ece_multilabel
 
@@ -167,7 +167,7 @@ BANDS = [
 ]
 PRITHVI_BAND_INDICES = [1, 2, 3, 7, 10, 11]
 
-BATCH_SIZE   = 256
+BATCH_SIZE   = 64
 EPOCHS = 50
 LR           = 1e-4
 WEIGHT_DECAY = 0.1
@@ -222,22 +222,9 @@ def load_biome_map(json_path: Path) -> dict:
 
 def print_split_biome_distribution(split_name: str, dataset, biome_map: dict):
     counts = defaultdict(int)
-    raw_ds = getattr(dataset, "dataset", dataset)
-    
-    if hasattr(raw_ds, "active_partition") and hasattr(raw_ds, "split") and raw_ds.split in raw_ds.active_partition.partition_dict:
-        sample_names = raw_ds.active_partition.partition_dict[raw_ds.split]
-    elif hasattr(raw_ds, "active_partition") and split_name in raw_ds.active_partition.partition_dict:
-        sample_names = raw_ds.active_partition.partition_dict[split_name]
-    else:
-        sample_names = [raw_ds[i].sample_name for i in range(len(raw_ds))]
-        
-    for sid in sample_names:
-        b = biome_map.get(str(sid), "Unknown")
-        counts[b] += 1
-        
-    print(f"  [{split_name.upper()} Split] Total samples before filter: {len(sample_names):,}")
-    for b in sorted(counts.keys()):
-        print(f"    • {b:<44} : {counts[b]:,}")
+    for sid in dataset_sample_ids(dataset):
+        counts[lookup_biome(biome_map, sid)] += 1
+    print(f"[{split_name}] {dict(counts)}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -270,8 +257,9 @@ class GeoBenchClassifDataset(torch.utils.data.Dataset):
             i for i, sid in enumerate(sample_names)
             if self.biome_map.get(str(sid), "Unknown") != "Unknown"
         ]
-        
+
         print(f"[Dataset] {split.upper()}: Filtered down to {len(self.valid_indices):,} samples with known biomes.")
+        self.valid_indices = list(range(len(self.dataset)))
 
     def __len__(self):
         return len(self.valid_indices)
@@ -279,18 +267,18 @@ class GeoBenchClassifDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         real_idx = self.valid_indices[idx]
         sample = self.dataset[real_idx]
-        
+
         x_data = sample.pack_to_3d(band_names=self.band_names)[0]
         x_data = x_data[:, :, self.band_indices]
         x      = torch.tensor(x_data, dtype=torch.float32).permute(2, 0, 1)
         x      = F.interpolate(x.unsqueeze(0), size=(224, 224), mode="bilinear", align_corners=False).squeeze(0)
-        
+
         if self.augment:
             if torch.rand(1) > 0.5:
                 x = torch.flip(x, dims=[1])
             if torch.rand(1) > 0.5:
                 x = torch.flip(x, dims=[2])
-                
+
         x      = (x - self.mean) / self.std
         y      = torch.tensor(sample.label, dtype=torch.float32)
         sid    = str(sample.sample_name)
@@ -301,65 +289,9 @@ class GeoBenchClassifDataset(torch.utils.data.Dataset):
 # 5. DBR REWEIGHTER MODULE
 # ─────────────────────────────────────────────────────────────────────────────
 
-class DynamicBiomeReweighter:
-    def __init__(self, train_biomes: list, alpha: float = DBR_ALPHA, ema: float = DBR_EMA):
-        self.alpha = alpha
-        self.ema   = ema
-
-        counts = defaultdict(int)
-        for b in train_biomes:
-            counts[b] += 1
-        self.biomes = sorted(counts.keys())
-        total = sum(counts.values())
-
-        inv_freq = {b: total / (len(self.biomes) * counts[b]) for b in self.biomes}
-        mean_if  = np.mean(list(inv_freq.values()))
-        self.w_current = {b: float(inv_freq[b] / mean_if) for b in self.biomes}
-
-        print(f"\n[DBR] Initialized for {len(self.biomes)} groups:")
-        for b in self.biomes:
-            print(f"  • {b:<44} : count={counts[b]:,}, w_init={self.w_current[b]:.4f}")
-
-    def get_weights_tensor(self, sample_ids: list, biome_map: dict, device: torch.device) -> torch.Tensor:
-        w_list = [self.w_current.get(biome_map.get(str(sid), "Unknown"), 1.0) for sid in sample_ids]
-        return torch.tensor(w_list, dtype=torch.float32, device=device)
-
-    def update_from_val(self, val_group_f1s: dict):
-        valid = {b: val for b, val in val_group_f1s.items() if b in self.w_current and val is not None and not np.isnan(val)}
-        if not valid:
-            return
-
-        mean_f1 = np.mean(list(valid.values()))
-        w_raw   = {}
-        for b in self.biomes:
-            if b in valid:
-                rel_diff = (mean_f1 - valid[b]) / (mean_f1 + 1e-6)
-                w_target = self.w_current[b] * (1.0 + self.alpha * rel_diff)
-                w_raw[b] = max(0.1, min(10.0, w_target))
-            else:
-                w_raw[b] = self.w_current[b]
-
-        mean_w = np.mean(list(w_raw.values()))
-        w_norm = {b: w_raw[b] / mean_w for b in self.biomes}
-
-        print("\n[DBR] Updating weights based on Val Macro F1:")
-        for b in self.biomes:
-            f1_str = f"{valid[b]:.4f}" if b in valid else "N/A"
-            w_old  = self.w_current[b]
-            w_new  = self.ema * w_old + (1 - self.ema) * w_norm[b]
-            self.w_current[b] = w_new
-            print(f"  • {b:<44} : F1={f1_str:>6} | w_old={w_old:.4f} → w_new={w_new:.4f}")
+from fairrsfm.methods.dbr import DynamicBiomeReweighter
 
 
-def build_dbr_weights(train_ds: GeoBenchClassifDataset, alpha: float = DBR_ALPHA, ema: float = DBR_EMA) -> DynamicBiomeReweighter:
-    print("[DBR] Scanning train set for macro biome labels...")
-    train_biomes = []
-    for real_idx in train_ds.valid_indices:
-        sid = str(train_ds.sample_names[real_idx]) if hasattr(train_ds, "sample_names") else str(train_ds.dataset[real_idx].sample_name)
-        group = train_ds.biome_map.get(sid, "Unknown")
-        if group != "Unknown":
-            train_biomes.append(group)
-    return DynamicBiomeReweighter(train_biomes, alpha=alpha, ema=ema)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -461,7 +393,7 @@ def compute_dpm(biome_data: dict, num_classes: int) -> float:
 # 7. LIGHTNING MODULE
 # ─────────────────────────────────────────────────────────────────────────────
 
-class ClassifLinearProbe(L.LightningModule):
+class ClassifLinearProbe(MethodTrainingMixin, L.LightningModule):
     def __init__(self, model, lr: float, weight_decay: float, num_classes: int,
                  reweighter=None, use_dbr: bool = False, biome_map: dict = None):
         super().__init__()
@@ -502,35 +434,8 @@ class ClassifLinearProbe(L.LightningModule):
         out = self.model(x)
         return out.logits if hasattr(out, "logits") else (out.output if hasattr(out, "output") else out)
 
-    def training_step(self, batch, batch_idx):
-        x, y, sample_ids = batch
-        if FREEZE_BACKBONE:
-            self.model.encoder.eval()
-        logits = self(x)
 
-        if self.use_dbr:
-            loss_per_sample = self.loss_fn_none(logits, y).mean(dim=-1)
-            sample_w = self.reweighter.get_weights_tensor(sample_ids, self.biome_map, device=x.device)
-            loss = (loss_per_sample * sample_w).mean()
-        else:
-            loss = self.loss_fn(logits, y)
 
-        self.log("train/loss", loss, prog_bar=True, on_step=True, on_epoch=True, batch_size=x.size(0))
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        x, y, sample_ids = batch
-        logits = self(x)
-        loss   = self.loss_fn(logits, y)
-        self.log("val/loss", loss, prog_bar=True, add_dataloader_idx=False, batch_size=x.size(0))
-        return {"logits": logits, "y": y, "sample_ids": sample_ids}
-
-    def test_step(self, batch, batch_idx):
-        x, y, sample_ids = batch
-        logits = self(x)
-        loss   = self.loss_fn(logits, y)
-        self.log("test/loss", loss, add_dataloader_idx=False, batch_size=x.size(0))
-        return {"logits": logits, "y": y, "sample_ids": sample_ids}
 
     def configure_optimizers(self):
         trainable = [p for p in self.model.parameters() if p.requires_grad]
@@ -568,25 +473,25 @@ class GlobalMacroF1Logger(Callback):
         y_true    = np.concatenate(pl_module._gf1_labels)
         probs     = np.concatenate(pl_module._gf1_probs)
         y_pred    = (probs > 0.5).astype(int)
-        
+
         opt_th = find_optimal_thresholds(y_true, probs, y_true.shape[1])
         y_pred_opt = (probs >= opt_th[None, :]).astype(int)
         present = [c for c in range(y_true.shape[1]) if y_true[:, c].sum() > 0]
         if present:
-            global_f1 = float(f1_score(y_true[:, present], y_pred_opt[:, present], average="macro", zero_division=0))
+            global_f1 = float(macro_f1_present(y_true[:, present], y_pred_opt[:, present], average="macro", zero_division=0))
         else:
             global_f1 = 0.0
         global_micro_f1 = float(f1_score(y_true, y_pred, average="micro", zero_division=0))
-        
+
         best_macro = 0.0
         best_micro = 0.0
         for t in np.linspace(0.1, 0.9, 17):
             yp = (probs > t).astype(int)
-            mac = f1_score(y_true, yp, average="macro", zero_division=0)
+            mac = macro_f1_present(y_true, yp, average="macro", zero_division=0)
             mic = f1_score(y_true, yp, average="micro", zero_division=0)
             if mac > best_macro: best_macro = mac
             if mic > best_micro: best_micro = mic
-            
+
         pl_module.log("val/macro_f1", global_f1, prog_bar=False, add_dataloader_idx=False)
         pl_module.log("val/micro_f1", global_micro_f1, prog_bar=False, add_dataloader_idx=False)
         pl_module.log("val/opt_macro_f1", float(best_macro), prog_bar=False, add_dataloader_idx=False)
@@ -608,255 +513,35 @@ class BiomeMacroF1Logger(Callback):
         self.opt_thresholds = None
 
     def _compute_and_log(self, biome_data, epoch, tb, tb_prefix, label, pl_module=None):
-        biome_data = {b: d for b, d in biome_data.items() if b != "Unknown"}
-        if not biome_data:
-            print(f"\n  Biome metrics [{label}] — epoch {epoch}: No known biomes found!")
-            return
-
-        all_labels = np.concatenate([d["true"] for d in biome_data.values()], axis=0)
-        all_probs = np.concatenate([d["probs"] for d in biome_data.values()], axis=0)
-        if label == "val":
-            self.opt_thresholds = find_optimal_thresholds(all_labels, all_probs, self.num_classes)
-        if self.opt_thresholds is None:
-            raise RuntimeError("Validation thresholds must be fitted before test evaluation")
-        optimal_thresholds = self.opt_thresholds
-        
-        for group, d in biome_data.items():
-            probs = np.array(d["probs"])
-            d["preds_opt"] = (probs >= optimal_thresholds[None, :]).astype(int)
-            d["pred"] = d["preds_opt"]  # Overwrite pred so fairness metrics use optimal thresholds
-
-        print(f"\n{'═'*82}")
-        print(f"  Macro Group Metrics [{label}] — epoch {epoch}")
-        print(f"{'═'*82}")
-        print(f"\n  ── Per-group Classification Metrics ───────────────────────────────────────")
-        print(f"  {'Macro Group':<44}  {'Opt F1':>8}  {'mAP':>7}  {'Acc':>7}  {'ECE':>7}")
-        print(f"  {'─'*44}  {'─'*8}  {'─'*7}  {'─'*7}  {'─'*7}")
-
-        group_f1s   = {}
-        group_micro_f1s = {}
-        group_maps  = {}
-        group_accs  = {}
-        group_eces  = {}
-        group_counts = {}
-
-        for group in sorted(biome_data.keys()):
-            d      = biome_data[group]
-            n      = len(d["true"])
-            y_true = np.array(d["true"])
-            y_pred = np.array(d["pred"])
-            probs  = np.array(d["probs"])
-
-            present = [c for c in range(self.num_classes) if y_true[:, c].sum() > 0]
-            if present:
-                f1 = float(f1_score(y_true[:, present], y_pred[:, present], average="macro", zero_division=0))
-            else:
-                f1 = 0.0
-
-            micro_f1 = float(f1_score(y_true, y_pred, average="micro", zero_division=0))
-            map_score = compute_map_score(y_true, probs, self.num_classes)
-            acc = float((y_pred == y_true).all(axis=1).mean())
-            ece = compute_ece_multilabel(y_true, probs)
-
-            group_f1s[group]    = f1
-            group_micro_f1s[group] = micro_f1
-            group_maps[group]   = map_score
-            group_accs[group]   = acc
-            group_eces[group]   = ece
-            group_counts[group] = n
-
-            print(f"  {group:<44}  {f1:>8.4f}  {map_score:>7.4f}  {acc:>7.4f}  {ece:>7.4f}")
-
-        # Option B (class-level disparities)
-        biomes  = sorted(biome_data.keys())
-        n_biome = len(biomes)
-        if n_biome >= 2:
-            f1_matrix = np.full((self.num_classes, n_biome), float("nan"))
-            for j, biome in enumerate(biomes):
-                data = biome_data[biome]
-                yt   = np.array(data["true"])
-                yp = np.array(data["pred"])
-                if len(yt) == 0:
-                    continue
-                for c in range(self.num_classes):
-                    yt_c = yt[:, c]
-                    yp_c = yp[:, c]
-                    if yt_c.sum() > 0:
-                        f1_matrix[c, j] = float(f1_score(yt_c, yp_c, zero_division=0))
-            
-            disparity = np.full(self.num_classes, float("nan"))
-            for c in range(self.num_classes):
-                valid = f1_matrix[c, ~np.isnan(f1_matrix[c])]
-                if len(valid) >= 2:
-                    disparity[c] = float(valid.max() - valid.min())
-                    
-            col_w  = 8
-            name_w = 36
-            sep    = "─"
-            biome_short = [b[:col_w] for b in biomes]
-
-            header = (f"  {'Class':<{name_w}}  "
-                      + "  ".join(f"{b:>{col_w}}" for b in biome_short)
-                      + f"  {'Disparity':>{col_w}}")
-            rule   = f"  {sep*name_w}  " + f"  {sep*col_w}" * n_biome + f"  {sep*col_w}"
-
-            print(f"\n  ── Option B: Class-level biome F1 (max-min disparity) {'─'*10}")
-            print(header)
-            print(rule)
-            
-            for c in range(self.num_classes):
-                name = self.class_names[c] if c < len(self.class_names) else f"cls{c}"
-                row  = f"  {name:<{name_w}}  "
-                row += "  ".join(
-                    f"{f1_matrix[c,j]:>{col_w}.3f}" if not np.isnan(f1_matrix[c, j])
-                    else f"{'nan':>{col_w}}"
-                    for j in range(n_biome)
-                )
-                disp_str = (f"{disparity[c]:>{col_w}.3f}"
-                            if not np.isnan(disparity[c]) else f"{'nan':>{col_w}}")
-                print(row + f"  {disp_str}")
-            print(rule)
-
-        valid_f1s  = [v for v in group_f1s.values() if v is not None and not np.isnan(v)]
-        valid_maps = [v for v in group_maps.values() if v is not None and not np.isnan(v)]
-        valid_accs = [v for v in group_accs.values() if v is not None and not np.isnan(v)]
-        valid_eces = [v for v in group_eces.values() if v is not None and not np.isnan(v)]
-
-        all_yt = np.concatenate([d["true"] for d in biome_data.values()])
-        all_yp = np.concatenate([d["pred"] for d in biome_data.values()])
-        all_pr = np.concatenate([d["probs"] for d in biome_data.values()])
-
-        overall_f1  = float(f1_score(all_yt, all_yp, average="macro", zero_division=0))
-        overall_micro_f1 = float(f1_score(all_yt, all_yp, average="micro", zero_division=0))
-        
-        best_overall_macro = 0.0
-        best_overall_micro = 0.0
-        for t in np.linspace(0.1, 0.9, 17):
-            yp_t = (all_pr > t).astype(int)
-            mac = f1_score(all_yt, yp_t, average="macro", zero_division=0)
-            mic = f1_score(all_yt, yp_t, average="micro", zero_division=0)
-            if mac > best_overall_macro: best_overall_macro = mac
-            if mic > best_overall_micro: best_overall_micro = mic
-            
-        overall_map = float(compute_map_score(all_yt, all_pr, self.num_classes))
-        overall_acc = float((all_yp == all_yt).all(axis=1).mean())
-
-        if len(valid_f1s) >= 2:
-            worst_f1  = float(np.min(valid_f1s))
-            best_f1   = float(np.max(valid_f1s))
-            mean_f1   = float(np.mean(valid_f1s))
-            std_f1    = float((np.std(valid_f1s, ddof=1) if len(valid_f1s) > 1 else 0.0))
-            per_ratio = float(worst_f1 / best_f1) if best_f1 > 0 else None
-            gini_coef = compute_gini(valid_f1s)
-            nfr       = float((best_f1 - worst_f1) / np.mean(valid_f1s)) if np.mean(valid_f1s) > 0 else float("nan")
-        else:
-            worst_f1 = best_f1 = mean_f1 = std_f1 = per_ratio = gini_coef = nfr = None
-
-        worst_map = float(np.min(valid_maps)) if len(valid_maps) >= 2 else None
-        worst_acc = float(np.min(valid_accs)) if len(valid_accs) >= 2 else None
-
-        if len(valid_eces) >= 2:
-            ece_disparity = float(np.max(valid_eces) - np.min(valid_eces))
-        else:
-            ece_disparity = None
-
-        eqodds_disp = compute_eqodds(biome_data, self.num_classes)
-        dpm_disp    = compute_dpm(biome_data, self.num_classes)
-
-        if pl_module is not None and label == "val":
-            pl_module.log("val/accuracy", overall_acc, on_step=False, on_epoch=True, sync_dist=True)
-            pl_module.log("val/mAP", overall_map, on_step=False, on_epoch=True, sync_dist=True)
-            if worst_f1 is not None:
-                pl_module.log("val/worst_case_macro_f1", worst_f1, on_step=False, on_epoch=True, sync_dist=True)
-            if worst_acc is not None:
-                pl_module.log("val/worst_case_accuracy", worst_acc, on_step=False, on_epoch=True, sync_dist=True)
-
-            if pl_module.use_dbr and pl_module.reweighter is not None:
-                pl_module.reweighter.update_from_val(group_f1s)
-
-        print(f"\n  ── Representational Fairness & Overall Performance ────────────────────────")
-        print(f"  {'Overall Macro F1':<44}  {overall_f1:.4f}")
-        print(f"  {'Worst-case Macro F1':<44}  {worst_f1 if worst_f1 is not None else float('nan'):.4f}")
-        print(f"  {'Best-case Macro F1':<44}  {best_f1 if best_f1 is not None else float('nan'):.4f}")
-        print(f"  {'Overall mAP':<44}  {overall_map:.4f}")
-        print(f"  {'Worst-case mAP':<44}  {worst_map if worst_map is not None else float('nan'):.4f}")
-        print(f"  {'Overall Accuracy':<44}  {overall_acc:.4f}")
-        print(f"  {'Worst-case Accuracy':<44}  {worst_acc if worst_acc is not None else float('nan'):.4f}")
-        print(f"  {'Performance Equity Ratio (Worst/Best)':<44}  {per_ratio if per_ratio is not None else float('nan'):.4f}")
-        print(f"  {'Gini Coefficient (Inequality)':<44}  {gini_coef if gini_coef is not None else float('nan'):.4f}")
-        print(f"  {'NFR (Normalized Fairness Range)':<44}  {nfr if nfr is not None else float('nan'):.4f}")
-        print(f"  {'ECE Disparity (Max-Min ECE)':<44}  {ece_disparity if ece_disparity is not None else float('nan'):.4f}")
-        print(f"  {'Group Macro F1 Std':<44}  {std_f1 if std_f1 is not None else float('nan'):.4f}")
-        print(f"  {'Equalized Odds Disparity':<44}  {eqodds_disp if not np.isnan(eqodds_disp) else float('nan'):.4f}")
-        print(f"  {'Demographic Parity Disparity':<44}  {dpm_disp if not np.isnan(dpm_disp) else float('nan'):.4f}")
-        print(f"{'═'*82}\n")
-
-        payload = {
-            "epoch": epoch,
-            "optimal_thresholds": optimal_thresholds.tolist(),
-            "overall_macro_f1": overall_f1,
-            "overall_micro_f1": overall_micro_f1,
-            "opt_overall_macro_f1": float(best_overall_macro),
-            "opt_overall_micro_f1": float(best_overall_micro),
-            "overall_mAP": overall_map,
-            "overall_accuracy": overall_acc,
-            "worst_case_macro_f1": worst_f1,
-            "best_case_macro_f1": best_f1,
-            "worst_case_mAP": worst_map,
-            "worst_case_accuracy": worst_acc,
-            "performance_equity_ratio": per_ratio,
-            "gini_coefficient": gini_coef,
-            "normalized_fairness_range": nfr,
-            "ece_disparity": ece_disparity,
-            "group_macro_f1_std": std_f1,
-            "equalized_odds_disparity": eqodds_disp,
-            "demographic_parity_disparity": dpm_disp,
-            "per_group_metrics": {
-                g: {"macro_f1": group_f1s[g], "micro_f1": group_micro_f1s[g], "mAP": group_maps[g], "accuracy": group_accs[g], "ece": group_eces[g], "sample_count": group_counts[g]}
-                for g in group_f1s
-            }
-        }
-
-        if not hasattr(self, "val_history"):
-            self.val_history = []
-        if not hasattr(self, "test_history"):
-            self.test_history = []
-            
-        history = self.val_history if label == "val" else self.test_history
-        history.append(payload)
-        json_file = self.output_dir / f"{label}_results.json"
-        with open(json_file, "w") as f:
-            json.dump(history, f, indent=2)
-        print(f"  [JSON] Results updated in {json_file}")
+        return report_epoch(self, biome_data, epoch, tb, tb_prefix, label, pl_module, task="bigearthnet", ignore_index=-1)
 
     def _eval_test_split_and_log(self, trainer, pl_module, epoch, tb):
-        if self.test_loader is None:
-            return
-        was_training = pl_module.training
-        pl_module.eval()
-        device = pl_module.device
-        store  = defaultdict(lambda: {"true": [], "pred": [], "probs": []})
+        with evaluating(pl_module):
+            if self.test_loader is None:
+                return
+            was_training = pl_module.training
+            pl_module.eval()
+            device = pl_module.device
+            store  = defaultdict(lambda: {"true": [], "pred": [], "probs": []})
 
-        with torch.no_grad():
-            for batch in self.test_loader:
-                x, y, sample_ids = batch
-                x = x.to(device)
-                logits = pl_module(x)
-                probs  = torch.sigmoid(logits.float()).cpu().numpy()
-                preds  = (probs > 0.5).astype(int)
-                labels = y.numpy()
+            with torch.no_grad():
+                for batch in self.test_loader:
+                    x, y, sample_ids = batch
+                    x = x.to(device)
+                    logits = forward_with_sample_ids(pl_module, x, sample_ids)
+                    probs  = torch.sigmoid(logits.float()).cpu().numpy()
+                    preds  = (probs > 0.5).astype(int)
+                    labels = y.numpy()
 
-                for i, sid in enumerate(sample_ids):
-                    group = self.biome_map.get(sid, "Unknown")
-                    if group == "Unknown":
-                        continue
-                    store[group]["true"].append(labels[i])
-                    store[group]["pred"].append(preds[i])
-                    store[group]["probs"].append(probs[i])
+                    for i, sid in enumerate(sample_ids):
+                        group = self.biome_map.get(sid, "Unknown")
+                        store[group]["true"].append(labels[i])
+                        store[group]["pred"].append(preds[i])
+                        store[group]["probs"].append(probs[i])
 
-        self._compute_and_log(store, epoch, tb, "group_metrics_test", "test")
-        if was_training:
-            pl_module.train()
+            self._compute_and_log(store, epoch, tb, "group_metrics_test", "test")
+            if was_training:
+                pl_module.train()
 
     def on_validation_epoch_start(self, trainer, pl_module):
         pl_module._biome_data_val = defaultdict(lambda: {"true": [], "pred": [], "probs": []})
@@ -874,8 +559,6 @@ class BiomeMacroF1Logger(Callback):
 
         for i, sid in enumerate(sample_ids):
             group = self.biome_map.get(sid, "Unknown")
-            if group == "Unknown":
-                continue
             pl_module._biome_data_val[group]["true"].append(labels[i])
             pl_module._biome_data_val[group]["pred"].append(preds[i])
             pl_module._biome_data_val[group]["probs"].append(probs[i])
@@ -883,15 +566,15 @@ class BiomeMacroF1Logger(Callback):
     def on_validation_epoch_end(self, trainer, pl_module):
         if trainer.sanity_checking or not pl_module._biome_data_val:
             return
-            
+
         all_y_true = np.concatenate([d["true"] for d in pl_module._biome_data_val.values()])
         all_probs = np.concatenate([d["probs"] for d in pl_module._biome_data_val.values()])
         opt_th = find_optimal_thresholds(all_y_true, all_probs, self.num_classes)
-        
+
         for group in pl_module._biome_data_val.keys():
             pr = np.array(pl_module._biome_data_val[group]["probs"])
             pl_module._biome_data_val[group]["pred"] = (pr >= opt_th[None, :]).astype(int)
-            
+
         epoch = trainer.current_epoch
         tb    = trainer.logger.experiment if trainer.logger else None
         self._compute_and_log(pl_module._biome_data_val, epoch, tb, "group_metrics_val", "val", pl_module=pl_module)
@@ -921,6 +604,7 @@ def build_model(weights_path: Path, num_classes: int):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def main():
+    global BATCH_SIZE
     logging.getLogger("lightning.pytorch").setLevel(logging.WARNING)
 
     parser = argparse.ArgumentParser(description="Prithvi BigEarthNet Classification DBR Training")
@@ -929,7 +613,11 @@ def main():
     parser.add_argument("--gpu", type=str, default="0", help="CUDA GPU device ID (default: 0)")
     parser.add_argument("--out-dir", type=str, default=None, help="Custom output directory")
     parser.add_argument("--resume-from", type=str, default=None, help="Path to checkpoint to resume training from")
+    parser.add_argument("--batch-size", type=int, default=BATCH_SIZE, help="Images per batch")
     args = parser.parse_args()
+    if args.batch_size < 1:
+        parser.error("--batch-size must be positive")
+    BATCH_SIZE = args.batch_size
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
     seed = args.seed
@@ -983,10 +671,11 @@ def main():
     print("══════════════════════════════════════════════════════════════════════\n")
 
     train_ds = GeoBenchClassifDataset(task, "train", biome_map, augment=True)
+    train_ds, protocol_groups = known_training_dataset(train_ds, lambda sid: lookup_biome(biome_map, sid))
     val_ds   = GeoBenchClassifDataset(task, "valid", biome_map, augment=False)
     test_ds  = GeoBenchClassifDataset(task, "test",  biome_map, augment=False)
 
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True,
+    train_loader = training_loader(train_ds, method='dbr', groups=protocol_groups, batch_size=BATCH_SIZE, shuffle=True,
                               num_workers=NUM_WORKERS, pin_memory=True, persistent_workers=True)
     val_loader   = DataLoader(val_ds,   batch_size=BATCH_SIZE, shuffle=False,
                               num_workers=NUM_WORKERS, pin_memory=True, persistent_workers=True)
@@ -996,12 +685,6 @@ def main():
     base_model = build_model(WEIGHTS_PT, NUM_CLASSES)
 
     reweighter = None
-    if USE_DBR:
-        reweighter = build_dbr_weights(
-            train_ds  = train_ds,
-            alpha     = DBR_ALPHA,
-            ema       = DBR_EMA,
-        )
 
     lp_model = ClassifLinearProbe(
         model       = base_model,
@@ -1012,6 +695,8 @@ def main():
         use_dbr     = USE_DBR,
         biome_map   = biome_map,
     )
+    configure_training_protocol(lp_model, 'dbr', 'bigearthnet', protocol_groups, args, ignore_index=-1, lookup=lambda sid: lookup_biome(biome_map, sid))
+    args.method_protocol = lp_model.method_protocol.config
 
     CKPT_MACRO_DIR = CKPT_DIR / "best_macro_f1"
     CKPT_WORST_DIR = CKPT_DIR / "best_worst_f1"
@@ -1019,10 +704,10 @@ def main():
     CKPT_WORST_DIR.mkdir(parents=True, exist_ok=True)
 
     ckpt_macro_cb = ModelCheckpoint(
-        monitor                 = "val/macro_f1",
+        monitor                 = 'val/benchmark_macro_f1',
         mode                    = "max",
         dirpath                 = CKPT_MACRO_DIR,
-        filename                = f"{mode_str}-macro-epoch={{epoch:02d}}-val_f1={{val/macro_f1:.4f}}",
+        filename                = f"{mode_str}-macro-epoch={{epoch:02d}}-val_f1={{val/benchmark_macro_f1:.4f}}",
         auto_insert_metric_name = False,
         save_top_k              = 3,
         save_last               = True,
@@ -1042,7 +727,7 @@ def main():
     )
 
     early_stop_cb = EarlyStopping(
-        monitor   = "val/macro_f1",
+        monitor   = 'val/benchmark_macro_f1',
         mode      = "max",
         patience  = EARLY_STOP_PATIENCE,
         min_delta = EARLY_STOP_MIN_DELTA,
@@ -1054,7 +739,7 @@ def main():
         num_classes = NUM_CLASSES,
         class_names = CLASS_NAMES,
         output_dir  = OUT_DIR,
-        test_loader = None,
+        test_loader = test_loader,
     )
     progress_bar_cb = CleanProgressBar(refresh_rate=20)
 
@@ -1077,7 +762,9 @@ def main():
         num_sanity_val_steps    = 2,
     )
 
+    record_config(OUT_DIR, __file__, args)
     trainer.fit(lp_model, train_loader, val_loader, ckpt_path=args.resume_from)
+    finalize_selected(trainer, lp_model)
 
     print(f"\n[Done] Best Macro F1 Checkpoint : {ckpt_macro_cb.best_model_path}")
     print(f"[Done] Best Macro F1 Score      : {ckpt_macro_cb.best_model_score:.4f}")

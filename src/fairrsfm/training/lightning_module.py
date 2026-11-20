@@ -70,20 +70,23 @@ class FairRSFMProbe(L.LightningModule):
             self.model.encoder.eval()
 
         if self.method == "bolp" and self.bolp_projector is not None:
-            # Extract features and project
             if hasattr(self.model, "encoder"):
-                feats = self.model.encoder(x)
-                if isinstance(feats, (list, tuple)):
-                    feats = feats[-1]
-                if feats.dim() == 4:
-                    feats = feats.mean(dim=[-2, -1])
-                elif feats.dim() == 3:
-                    feats = feats.mean(dim=1)
-                biome_ids = [self.biome_map.get(str(s), "Unknown") for s in (sample_ids or [])]
-                proj_feats = self.bolp_projector(feats, biome_ids=biome_ids)
-                if hasattr(self.model, "head"):
-                    return self.model.head(proj_feats)
-                return proj_feats
+                biome_ids = ([self.biome_map.get(str(s), "Unknown") for s in sample_ids]
+                             if sample_ids is not None else None)
+
+                def project_final(module, inputs, features):
+                    if isinstance(features, (list, tuple)):
+                        values = list(features)
+                        values[-1] = self.bolp_projector(values[-1], biome_ids)
+                        return tuple(values) if isinstance(features, tuple) else values
+                    return self.bolp_projector(features, biome_ids)
+
+                handle = self.model.encoder.register_forward_hook(project_final)
+                try:
+                    out = self.model(x)
+                finally:
+                    handle.remove()
+                return out.logits if hasattr(out, "logits") else (out.output if hasattr(out, "output") else out)
 
         out = self.model(x)
         return out.logits if hasattr(out, "logits") else (out.output if hasattr(out, "output") else out)
@@ -95,6 +98,8 @@ class FairRSFMProbe(L.LightningModule):
         if self.method == "dbr" and self.reweighter is not None:
             loss_per_sample = self.loss_fn_none(logits, y)
             sample_w = self.reweighter.get_weights_tensor(sample_ids, self.biome_map, device=x.device)
+            self.reweighter.observe(loss_per_sample,
+                [self.biome_map.get(str(s), "Unknown") for s in sample_ids])
             loss = (loss_per_sample * sample_w).mean()
         elif self.method == "groupdro" and self.group_dro is not None:
             loss_per_sample = self.loss_fn_none(logits, y)
@@ -105,6 +110,18 @@ class FairRSFMProbe(L.LightningModule):
 
         self.log("train/loss", loss, prog_bar=True, on_step=True, on_epoch=True, batch_size=x.size(0))
         return loss
+
+    def on_train_epoch_start(self):
+        # Saved accumulators also cover a resume from a validation checkpoint,
+        # which Lightning may write before on_train_epoch_end.
+        if self.method == "dbr" and self.reweighter is not None and self.current_epoch > 0:
+            if int(self.reweighter.last_update_epoch) < self.current_epoch - 1:
+                self.reweighter.finish_epoch(self.current_epoch - 1)
+
+    def on_train_epoch_end(self):
+        if self.method == "dbr" and self.reweighter is not None:
+            if int(self.reweighter.last_update_epoch) < self.current_epoch:
+                self.reweighter.finish_epoch(self.current_epoch)
 
     def validation_step(self, batch, batch_idx):
         x, y, sample_ids = batch

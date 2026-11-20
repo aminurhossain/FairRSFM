@@ -45,6 +45,7 @@ def test_benchmark_checkpoint_does_not_collide_with_terratorch(tmp_path, method)
     loader = DataLoader(TensorDataset(torch.ones(2, 1)), batch_size=2)
     callback = module.EpochMetricsSaverCallback(
         val_loader=loader, tile_info={}, num_classes=2, out_dir=tmp_path,
+        test_loader=loader,
         device=torch.device("cpu"),
     )
     checkpoint = ModelCheckpoint(
@@ -62,4 +63,7 @@ def test_benchmark_checkpoint_does_not_collide_with_terratorch(tmp_path, method)
     assert "0.7300" in checkpoint.best_model_path
     assert checkpoint.best_model_score.item() == pytest.approx(0.73)
     saved = json.loads((tmp_path / "val_results.json").read_text())
-    assert saved["epoch_0"]["val"]["global_miou"] == 0.73
+    assert saved[-1]["global_miou"] == 0.73
+    test_saved = json.loads((tmp_path / "test_results.json").read_text())
+    assert test_saved[-1]["global_miou"] == 0.73
+    assert test_saved[-1]["epoch"] == 0

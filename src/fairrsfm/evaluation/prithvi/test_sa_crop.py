@@ -23,7 +23,7 @@ from torch.utils.data import DataLoader
 ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
-from evaluation.checkpoint import load_finetuned_state
+from evaluation.checkpoint import load_finetuned_state, reject_unified_protocol_checkpoint
 from evaluation.serialization import json_safe
 
 try:
@@ -155,6 +155,7 @@ def build_and_load_model(ckpt_path: Path, backbone_weights: Path, device: torch.
     )
 
     ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    reject_unified_protocol_checkpoint(ckpt)
     sd = ckpt.get("state_dict", ckpt)
 
     is_bolp = any("projector" in k or "Pk" in k for k in sd.keys())

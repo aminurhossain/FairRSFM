@@ -95,7 +95,11 @@ class MMEarthDynamicWorldSegmentationDataset(Dataset):
         indices: Sequence[int] | None = None,
     ) -> None:
         self.data_root = Path(data_root)
-        self.h5_path = find_one(self.data_root, "*fixed.h5")
+        fixed_matches = sorted(self.data_root.glob("*fixed.h5"))
+        if len(fixed_matches) == 1:
+            self.h5_path = fixed_matches[0]
+        else:
+            self.h5_path = find_one(self.data_root, "*.h5")
         self.splits_path = find_one(self.data_root, "*splits.json")
         self.band_stats_path = find_one(self.data_root, "*band_stats.json")
 
@@ -218,6 +222,12 @@ class MMEarthDynamicWorldSegmentationDataModule(LightningDataModule):
         self._split_indices = self._make_split_indices()
         if stage in (None, "fit"):
             self.train_dataset = self._dataset("train")
+            if hasattr(self, "known_training_ids"):
+                from fairrsfm.training.protocol import dataset_sample_ids, KnownBiomeSubset
+                allowed = set(self.known_training_ids)
+                ids = dataset_sample_ids(self.train_dataset)
+                self.train_dataset = KnownBiomeSubset(self.train_dataset,
+                    [i for i, sid in enumerate(ids) if sid in allowed])
             self.val_dataset = self._dataset("val")
         if stage in (None, "validate"):
             self.val_dataset = self._dataset("val")
@@ -241,7 +251,9 @@ class MMEarthDynamicWorldSegmentationDataModule(LightningDataModule):
         data_root = Path(self.data_root)
         splits_path = find_one(data_root, "*splits.json")
         splits = json.loads(splits_path.read_text(encoding="utf-8"))
-        with h5py.File(find_one(data_root, "*fixed.h5"), "r") as h5:
+        fixed_matches = sorted(data_root.glob("*fixed.h5"))
+        h5_path = fixed_matches[0] if len(fixed_matches) == 1 else find_one(data_root, "*.h5")
+        with h5py.File(h5_path, "r") as h5:
             num_rows = int(h5["metadata"].shape[0])
 
         train_indices = validate_indices("train", splits.get("train", []), num_rows)

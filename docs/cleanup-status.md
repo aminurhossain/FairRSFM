@@ -1,121 +1,124 @@
-# Repository cleanup status
+# Repository experiment status
 
-This records the implementation boundary before running new IJRS experiments.
+This note describes the benchmark code after the cleanup and reporting pass.
+The metric definitions and class-presence rules are specified in
+[`metric-definitions.md`](metric-definitions.md).
 
-## Completed in the current cleanup pass
+## Canonical benchmark matrix
 
-- Added a mathematical metric contract in `docs/metric-definitions.md` and a
-  corresponding copy in the original `FairRSFM/evaluation` folder.
-- BigEarthNet training uses validation-selected thresholds, the same
-  `0.10, 0.15, ..., 0.90` grid, and per-label binary ECE across all 12
-  model-method scripts. Threshold vectors are saved in validation records.
-- BigEarthNet checkpoint evaluation requires validation thresholds and checks
-  their epoch against Lightning checkpoint metadata when present.
-- All 12 checkpoint evaluators import and show CLI help. Shared scoring keys,
-  MMEarth band/ignore settings, SA-Crop ignore settings, and the BigEarthNet
-  output schema were repaired. Checkpoint loading rejects missing task weights;
-  evaluator JSON stores undefined metrics as `null`.
-- `.gitignore` still excludes local runs, checkpoints, logs, and scratch data.
-- Added `experiments/run_prithvi_matrix.py` for isolated Prithvi matrices with
-  two bounded workers, run manifests, per-job status, and non-overwriting output
-  directories. The ERM and BOLP training scripts now accept those output paths.
-  MMEarth training saves validation metrics each epoch and evaluates test
-  metrics only after selecting a checkpoint from validation.
-- New Prithvi classification BOLP checkpoints store biome projection metadata.
-  Their evaluators now apply the same token-shaped encoder transform used by
-  training, with biome IDs from the test samples. A synthetic hook test checks
-  shape and group residualization.
-- Consolidated the duplicate root training entry point and top-level MMEarth
-  data module into compatibility shims. Removed empty Git placeholders and the
-  unused SA-Crop BOLP callbacks that selected checkpoints from test metrics.
-  Existing local run artifacts remain ignored and untouched.
+The repository has 48 canonical runs per seed: Prithvi, SatMAE, and DOFA on
+EuroSAT, BigEarthNet, SA-Crop, and MMEarth, using ERM, DBR, BOLP, and GroupDRO.
+The eight DOFA UPerNet scripts remain available as additional segmentation
+variants. All 56 scripts now use the shared training objectives and reporting
+contract. The method choices are specified in [`methods.md`](methods.md):
 
-## Audit before the next Prithvi matrix
+- Common per-image task losses; valid-pixel mean loss per segmentation patch.
+- The same known-biome training subset for all four methods; full validation
+  and test splits remain available for overall scoring.
+- DBR uses epoch group training-loss EMA with beta 0.9 and alpha 0.5.
+- GroupDRO uses the official update-before-objective rule and group-balanced
+  sampling with replacement.
+- BOLP fits training-only centroids and transforms only the final encoder
+  layer, with residual centering and default rank `min(number of groups - 1, d)`.
 
-- The 2026-10-22 ERM+BOLP tmux run was stopped and only its
-  `runs/prithvi_matrix/prithvi_erm_bolp_audit_20261022` directory was removed.
-- Prithvi SA-Crop ERM and DBR retain their per-epoch test evaluation, as
-  requested. They also save the validation-selected checkpoint's test result
-  separately in `test_selected.json`.
-- Prithvi MMEarth ERM, BOLP, and DBR checkpoint selection now logs the exact
-  present-ground-truth-class global mIoU written to the validation JSON.
-  The benchmark monitor uses `val/benchmark_miou` so it does not collide with
-  TerraTorch's inherited `val/mIoU` logging.
-- Prithvi MMEarth validation and final selected-test evaluation now pass tile
-  IDs and biome metadata to BOLP, matching the training forward pass. The
-  previous calls applied projection without biome residualization.
-- The DOFA and SatMAE EuroSAT/BigEarthNet checkpoint evaluators now calculate
-  global macro-F1 with the same present-class rule as group macro-F1.
-- Static code inspection found all four SatMAE MMEarth training scripts also
-  evaluate test data on every validation epoch. This behavior is retained by
-  request. They do not yet save a final test result for the validation-selected
-  checkpoint.
+Method state and training population hashes are checkpointed. Resume rejects
+changed method settings, changed training group assignments, and missing head
+or method state, including in adapters that allow omitted frozen weights.
 
-## Work before paper-grade reruns
+Every training callback evaluates validation and test data at the end of each
+epoch. Validation metrics select checkpoints and, for BigEarthNet, fit the
+epoch's class thresholds. The test pass uses those same thresholds and writes
+its own epoch record. Final selected-checkpoint test reports are also saved;
+group confidence intervals resample images for classification and patches for
+segmentation, never individual pixels.
 
-### 2026-10-23 matrix failure review
+The shared reporting implementation is in
+[`src/fairrsfm/training/reporting.py`](../src/fairrsfm/training/reporting.py).
+It writes `val_results.json`, `test_results.json`, `training_config.json`, and
+selected-checkpoint reports with JSON-safe values. Per-group diagnostics
+include true and predicted class counts, GT-present macro-F1, union macro-F1,
+class-matched macro-F1, and support flags. The global and group macro-F1
+contract averages classes present in that group's ground truth; absent classes
+are excluded. Unknown biome samples contribute to overall results and are
+excluded from group fairness summaries.
 
-All launcher logs and nested training logs in `prithvi_erm_bolp_20261023`
-were inspected. BigEarthNet ERM and SA-Crop BOLP exited successfully.
-SA-Crop ERM completed training and wrote `test_selected.json`, then failed
-on the supplementary worst-group checkpoint test. Its fitted checkpoints
-remain available; retraining is unnecessary to recover that evaluation.
+The primary checkpoint monitors are `val/benchmark_macro_f1` for EuroSAT and
+BigEarthNet and `val/benchmark_miou` for SA-Crop and MMEarth. MMEarth keeps
+TerraTorch's native `val/mIoU` log separate from the benchmark monitor.
 
-Repairs:
+## Launching the matrix
 
-- EuroSAT: convert shared-class NumPy IDs to Python integers before JSON
-  serialization. The diagnostics regression test now serializes the payload.
-- MMEarth: benchmark checkpoint monitor is `val/benchmark_miou`; inherited
-  TerraTorch logging retains `val/mIoU`. Three CPU Lightning integration tests
-  verify the real benchmark callbacks save the checkpoint with the reported
-  validation score without a logging-name collision.
-- BigEarthNet ERM/BOLP: batch size is configurable with `--batch-size` and
-  defaults to 64 rather than 256. BOLP feature fitting is also capped by that
-  smaller default. Available shared-GPU memory still determines feasibility.
-- SA-Crop ERM/BOLP/DBR: snapshot both selected checkpoint paths before testing
-  because Lightning restores historical callback state during a test call.
-  Export primary checkpoint weights before evaluating the supplementary one.
+`experiments/run_matrix.py` is the canonical entry point. For one seed and all
+48 paths, provide one GPU entry per simultaneous worker, for example:
 
-Five jobs failed before completing training: EuroSAT ERM/BOLP, BigEarthNet
-BOLP, and MMEarth ERM/BOLP. Existing logs and outputs were preserved.
+```bash
+python experiments/run_matrix.py \
+  --models prithvi satmae dofa \
+  --datasets eurosat bigearthnet sa_crop mmearth \
+  --methods erm dbr bolp groupdro \
+  --seeds 42 \
+  --epochs 50 \
+  --gpus 0 0 \
+  --run-id ijrs_full_seed42
+```
 
-### GPU smoke checks after the repairs
+Repeated GPU IDs allow two workers to share one GPU. Use a unique run ID; the
+launcher refuses to overwrite an existing output directory and records the
+source hashes and job status in the run manifest. Add `--dry-run` to inspect
+the 48 resolved jobs without starting training. Add `--smoke-test` for bounded
+real-model checks; smoke results are not benchmark results.
 
-The `prithvi_smoke_20261023_v1` matrix completed all eight GPU jobs successfully
-with two workers sharing GPU 0. Checks use real datasets and pretrained weights,
-one epoch, two Lightning train/validation/test batches, and up to eight batches
-for projection fitting and direct callback evaluations. They exercise training,
-metric JSON writes and checkpoint selection. Segmentation additionally reloads
-the selected checkpoint and writes final test outputs. Smoke scores are not
-benchmark results and must not be used in paper tables.
+## Verification completed
 
-EuroSAT BOLP's saved checkpoint was also restored by the standalone evaluator
-on the full test split; support diagnostics and 1,000-replicate confidence
-intervals were verified. MMEarth BOLP's override needed additional updates to
-the inherited train/validation/test metric collections; its repeat GPU check
-passed and is stored under `prithvi_smoke_20261023_mmearth_bolp_v2`. The repeat
-produced finite native test mIoU without the uninitialized-metric warning.
-The complete regression suite also passed all 16 tests.
+- The callback suite exercises the actual callback implementations across all
+  53 standard training scripts and checks that test reporting runs after
+  validation, saves JSON, reports per-group class support, and restores model
+  train/eval modes. The three Prithvi MMEarth callbacks have Lightning lifecycle
+  tests for the checkpoint monitor and both split records.
+- The regression suite passes 107 tests, covering metric definitions, all 16
+  task/method objective combinations, final-layer BOLP behavior, known-biome
+  subsets, GroupDRO sampling, DBR epoch boundaries/resume, missing-state
+  rejection, unknown-biome overall evaluation, MMEarth checkpoint monitors,
+  both DOFA UPerNet BOLP adapters, the generic probe's final-layer hook, and
+  safeguards in all twelve legacy standalone evaluators.
+- Seven bounded real-data GPU smoke jobs completed successfully during this
+  refactor. Each includes training, per-epoch validation/test reporting, and
+  selected-checkpoint evaluation:
 
-To repeat the bounded GPU matrix in a fresh directory, use
-`python experiments/run_prithvi_matrix.py --methods erm bolp --gpus 0 0 --run-id UNIQUE_SMOKE_ID --smoke-test`.
-Omit `--smoke-test` for full training. Full training still needs to finish
-before the resulting experiments can be considered validated end to end.
+  | Run ID | Checks |
+  | --- | --- |
+  | `protocol_smoke_20261023_v1` | Prithvi EuroSAT: ERM, DBR, GroupDRO, BOLP |
+  | `protocol_adapter_smoke_20261023_v1` | SatMAE BigEarthNet: BOLP |
+  | `protocol_segmentation_smoke_20261023_v1` | Prithvi MMEarth: BOLP |
+  | `protocol_dofa_smoke_20261023_v1` | DOFA SA-Crop: BOLP |
 
-1. Reconstruct and verify remaining BOLP checkpoint evaluators against their
-   training architectures. Prithvi classification has a matching hook but still
-   needs a real checkpoint evaluation; Prithvi segmentation and the SatMAE/DOFA
-   BOLP evaluator paths remain to be checked. The load check makes mismatches
-   fail explicitly.
-2. Run one real checkpoint evaluation for every backbone, dataset, and method;
-   the CLI checks and synthetic BigEarthNet scoring test do not validate
-   backbone restoration or the full data pipeline. The repository contains
-   local slim checkpoints but no pretrained backbone weights under
-   `checkpoints/` in this workspace. The Prithvi 300M backbone weights are
-   available in the older local `FairRSFM_unified/checkpoints` directory.
-3. Consolidate training model/method code and YAML config handling. The
-   launcher still dispatches to separate scripts, and DBR implementations have
-   method differences that need an explicit protocol decision.
-4. Rerun the comparison with the fixed metric contract and three seeds, then
-   replace the historical result tables only after checking checkpoint,
-   threshold, split, and seed provenance.
+  These cover all three backbones and four tasks, but do not verify every
+  combination. Smoke fitting/evaluation is batch-limited and its outputs must
+  not be used as paper results. Run manifests and per-job configurations record
+  the source versions used while the refactor was in progress.
+- A prior Prithvi ERM+BOLP smoke matrix completed eight real-data GPU jobs.
+  It predates this cross-backbone reporting pass and does not verify all 48
+  model/method/data combinations.
+- The earlier Prithvi ERM+BOLP matrix is partial: EuroSAT ERM and BOLP have
+  successful status files; BigEarthNet ERM and BOLP have checkpoints through
+  roughly epochs 29 and 31 but no completion status; SA-Crop and MMEarth have
+  no job outputs in that run. These checkpoints predate the shared reporting
+  changes and must not be mixed with future standardized DBR results.
+
+## Remaining work before paper tables
+
+1. Full 48-run execution remains deferred. Before paper training, complete the
+   remaining adapter smoke coverage, including the optional UPerNet variants.
+   CPU callback tests do not establish that every model restores its weights
+   or runs its complete data pipeline.
+2. The twelve legacy standalone evaluator scripts now reject unified
+   checkpoints. This prevents their older architecture reconstruction from
+   silently changing a final-layer BOLP model or metric path. For every new
+   run, use the automatically written `test_selected.json` and
+   `test_selected_worst.json`; those reports use the exact training adapter,
+   preprocessing, BOLP state, threshold selection, and shared metric contract.
+   The standalone scripts remain for historical checkpoints only.
+3. Use old Prithvi checkpoints only for diagnostics;
+   rerun under the unified protocol before using results in paper tables.
+4. Run the paper comparison with the agreed seeds and update result tables only
+   after checking checkpoint, threshold, split, and seed provenance.

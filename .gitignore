@@ -74,3 +74,36 @@ launch_retry_failed_tmux.sh
 *.tar
 *.tar.gz
 *.zip
+
+# Paper drafts, internal review notes, doubts, and supervisor audit reports
+/paper/
+*.pdf
+*REPORT*.md
+*AUDIT*.md
+*audit*.md
+*Doubt*.md
+*doubts*.md
+*Roadmap*.md
+DAILY_TRAINING_MONITOR.md
+
+# Experiment checkpoint directories, local model weights, and temp dirs
+/Final_*/
+/models/
+/temp/
+/test_temp_verify/
+/scripts/
+/configs/
+
+# Local batch runners and machine-specific queue scripts
+/run_*.sh
+/run_*.py
+
+# Credentials, secrets, and auth
+*.pem
+*.key
+*.token
+.env*
+!*.env.example
+credentials.json
+client_secret*.json
+

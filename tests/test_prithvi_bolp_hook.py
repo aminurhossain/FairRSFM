@@ -41,6 +41,28 @@ class PrithviBOLPHookTests(unittest.TestCase):
                 "projector.mu_table": torch.zeros(1, 2),
             }, torch.device("cpu"))
 
+    def test_new_protocol_projects_all_tokens_and_preserves_earlier_layers(self):
+        model = TokenModel()
+        class Features(nn.Module):
+            def forward(self, x):
+                return [x + 10, x]
+        model.encoder = Features()
+        checkpoint = {"bolp_biome_index": {"forest": 0},
+                      "bolp_skip_residualization": False,
+                      "hyper_parameters": {"method_protocol": {"bolp_transform": "tokenwise_v1"}}}
+        state = {"projector.mu0": torch.zeros(2),
+                 "projector.Pk": torch.diag(torch.tensor([1., 0.])),
+                 "projector.mu_table": torch.tensor([[1., 0.]])}
+        attach_classification_bolp(model, checkpoint, state, torch.device("cpu"))
+        tokens = torch.tensor([[[2., 3.], [4., 5.]]])
+        model.bolp_biome_ids = ["forest"]
+        early, final = model(tokens)
+        torch.testing.assert_close(early, tokens + 10)
+        torch.testing.assert_close(final, torch.tensor([[[1., 0.], [3., 0.]]]))
+        # Unknown inference groups still receive the global projection.
+        model.bolp_biome_ids = None
+        torch.testing.assert_close(model(tokens)[-1], torch.tensor([[[2., 0.], [4., 0.]]]))
+
 
 if __name__ == "__main__":
     unittest.main()

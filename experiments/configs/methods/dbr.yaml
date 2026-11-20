@@ -2,11 +2,14 @@ method: "DBR"
 full_name: "Dynamic Biome Reweighting"
 type: "loss_reweighting"
 use_biome_during_training: true
+training_subset: "known_biome"
 hyperparameters:
   alpha: 0.5
-  ema: 0.8
-  min_weight: 0.1
-  max_weight: 10.0
+  beta: 0.9
+  epsilon: 0.000001
+  update_every_epochs: 1
+  feedback: "unweighted_group_training_loss"
+  initialization: "inverse_training_group_frequency"
   lr: 0.001
   weight_decay: 0.0001
   optimizer: "AdamW"

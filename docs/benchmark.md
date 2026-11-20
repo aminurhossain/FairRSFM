@@ -79,18 +79,25 @@ This design isolates the properties of the pretrained representation. Any change
 | Setting | Value |
 |---|---|
 | Input size | 224 x 224 |
-| Optimizer | AdamW |
-| Adam betas | 0.9, 0.999 |
-| Base learning rate | `1e-3` |
+| Optimizer | Backbone/task adapter setting; recorded per run (includes AdamW and DOFA LARS) |
+| Base learning rate | Adapter setting; recorded per run |
 | Final cosine learning rate | `1e-6` |
-| Weight decay | `1e-4` |
+| Weight decay | Adapter setting; recorded per run |
 | Schedule | Cosine annealing |
 | Epochs | 50 |
-| Early-stopping patience | 15 |
-| Classification batch size | 64 |
-| Segmentation batch size | 32 |
-| Random seeds | 3 independent runs |
+| Early-stopping patience | Adapter setting; recorded in source/configuration |
+| Batch size | Adapter default or explicit launcher override; recorded per run |
+| Random seeds | Recorded per run; independent seed repeats required for paper comparisons |
 | Checkpoint selection | Best validation overall metric |
+| Training population | Same known-biome training subset for all four methods |
+| GroupDRO sampling | Inverse group-frequency sampling with replacement |
+| Validation/test population | Full retained split, including unknown-biome images for overall scores |
+| Test frequency | Every epoch, plus selected-checkpoint evaluation |
+
+The shared method algorithms and task losses are defined in
+[`methods.md`](methods.md). This refactor keeps the existing adapter-specific
+heads and optimizer settings; it does not establish identical hyperparameters
+across backbones. Run records hash the source and retained training population.
 
 Test reporting includes the overall task score, worst-group performance, expected calibration error, normalized failure range, equalized-odds disparity, and demographic-parity disparity.
 

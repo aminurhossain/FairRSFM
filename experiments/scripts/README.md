@@ -1,114 +1,62 @@
-# Methods Guide: Debiasing Algorithms & Training
+# Training scripts
 
-This directory contains the training and debiasing implementations for the 48 benchmark configurations (3 Foundation Models × 4 Datasets × 4 Methods).
+The canonical matrix contains 48 configurations per seed: three backbones,
+four datasets, and four methods. The eight DOFA UPerNet segmentation variants
+are additional configurations.
 
----
+All scripts use the shared objectives in
+[`protocol.py`](../../src/fairrsfm/training/protocol.py) and algorithms in
+[`methods/`](../../src/fairrsfm/methods/). The mathematical contract is in
+[`docs/methods.md`](../../docs/methods.md).
 
-## 🧠 Debiasing Algorithms
+| Method | Shared rule |
+| --- | --- |
+| ERM | Mean task loss over retained training images/patches. |
+| DBR | Epoch group training-loss EMA, beta 0.9; weights proportional to `(EMA loss + 1e-6)^0.5`, normalized to mean 1; inverse-frequency initialization. |
+| GroupDRO | Official update-before-objective exponential group probabilities, eta 0.01; inverse group-frequency sampling with replacement. |
+| BOLP | Training-only group centroids, equal group global mean, residual centering, rank `min(number of groups - 1, dimension)`; transform only the final encoder layer. |
 
-| Method | Type | Description | Key Hyperparameters |
-| :--- | :--- | :--- | :--- |
-| **ERM** | Baseline | Standard Empirical Risk Minimization / Linear Probing with uniform sample weighting. | `--lr`, `--weight_decay` |
-| **GroupDRO** | Minimax Optimization | Group Distributionally Robust Optimization. Maintains online exponentiated group weights updated via step size $\eta_q$: $q_g \leftarrow q_g \exp(\eta_q \ell_g)$. | `--group_dro_step_size` (0.01) |
-| **DBR** | Dynamic Reweighting | Dynamic Biome Reweighting. Updates running exponential moving average (EMA) group validation losses and reweights loss during training: $w_g \propto \exp(\alpha \cdot \bar{\ell}_g)$. | `--dbr_alpha` (0.5), `--dbr_ema` (0.8 - 0.9) |
-| **BOLP** | Subspace Decomposition | Biome-Orthogonal Linear Probing. Projects feature representations into a biome-invariant subspace while isolating rank-$k$ biome-specific variations: $W_g = W_{\text{shared}} + U_g V_g^\top$. | `--bolp_k` (1 - 5) |
+All methods train on the same known-biome subset. Validation and test retain
+unknown-biome samples for overall scoring. Segmentation uses valid-pixel mean
+cross-entropy per patch, EuroSAT uses per-image cross-entropy, and BigEarthNet
+uses per-image BCE averaged over labels. Backbones stay frozen.
 
----
+Per-epoch validation and test reporting remain enabled. Validation selects
+checkpoints and BigEarthNet thresholds; test metrics do not update methods.
+Checkpoint state includes the method configuration, group statistics, and BOLP
+projectors. Historical checkpoints cannot resume as the new shared protocol.
 
-## 📁 Directory Structure
+## Directory structure
 
 ```text
-methods/
+experiments/scripts/
 ├── prithvi/
-│   ├── classification/
-│   │   ├── bigearthnet/       # bigearthnet_erm.py, bigearthnet_groupdro.py, bigearthnet_dbr.py, bigearthnet_bolp.py
-│   │   └── eurosat/           # eurosat_erm.py, eurosat_groupdro.py, eurosat_dbr.py, eurosat_bolp.py
-│   └── segmentation/
-│       ├── sa_crop/           # sa_crop_erm.py, sa_crop_groupdro.py, sa_crop_dbr.py, sa_crop_bolp.py
-│       └── mmearth_20k/       # mmearth_erm.py, mmearth_groupdro.py, mmearth_dbr.py, mmearth_bolp.py
-│
-├── satmae/
-│   ├── bigearthnet/           # bigearthnet_erm.py, bigearthnet_groupdro.py, bigearthnet_dbr.py, bigearthnet_bolp.py
-│   ├── eurosat/               # eurosat_erm.py, eurosat_groupdro.py, eurosat_dbr.py, eurosat_bolp.py
-│   ├── sa_crop/               # sa_crop_erm.py, sa_crop_groupdro.py, sa_crop_dbr.py, sa_crop_bolp.py
-│   └── mmearth/               # mmearth_erm.py, mmearth_groupdro.py, mmearth_dbr.py, mmearth_bolp.py
-│
-└── dofa/
-    ├── bigearthnet/           # erm.py, groupdro.py, dbr.py, bolp.py
-    ├── eurosat/               # erm.py, groupdro.py, dbr.py, bolp.py
-    ├── sa_crop/               # Linear probe (erm.py, groupdro.py, dbr.py, bolp.py)
-    ├── sa_crop_upernet/       # Dense UPerNet decoder (erm.py, groupdro.py, dbr.py, bolp.py)
-    ├── mmearth/               # Linear probe (erm.py, groupdro.py, dbr.py, bolp.py)
-    └── mmearth_upernet/       # Dense UPerNet decoder (erm.py, groupdro.py, dbr.py, bolp.py)
+│   ├── classification/{eurosat,bigearthnet}/
+│   └── segmentation/{sa_crop,mmearth_20k}/
+├── satmae/{eurosat,bigearthnet,sa_crop,mmearth}/
+└── dofa/{eurosat,bigearthnet,sa_crop,mmearth,sa_crop_upernet,mmearth_upernet}/
 ```
 
----
+## Commands from the repository root
 
-## 🚀 Execution Examples
-
-### 1. Prithvi EO V2 300M
+Use the unified entry point to translate each adapter's CLI flags:
 
 ```bash
-# EuroSAT ERM
-python methods/prithvi/classification/eurosat/eurosat_erm.py \
-    --seed 42 \
-    --lr 1e-3 \
-    --max_epochs 50
+python experiments/train.py --model prithvi --dataset eurosat --method erm \
+  --seed 42 --epochs 50 --batch-size 64 --gpu 0 --output_dir runs/example_prithvi_erm
 
-# BigEarthNet GroupDRO
-python methods/prithvi/classification/bigearthnet/bigearthnet_groupdro.py \
-    --seed 42 \
-    --group_dro_step_size 0.01 \
-    --max_epochs 50
+python experiments/train.py --model satmae --dataset bigearthnet --method dbr \
+  --seed 42 --epochs 50 --batch-size 64 --gpu 0 --output_dir runs/example_satmae_dbr
 
-# South Africa Crop Type BOLP (Segmentation)
-python methods/prithvi/segmentation/sa_crop/sa_crop_bolp.py \
-    --seed 42 \
-    --bolp_k 1 \
-    --max_epochs 50
+python experiments/train.py --model dofa --dataset sa_crop --head upernet --method bolp \
+  --seed 42 --epochs 50 --batch-size 16 --gpu 0 --output_dir runs/example_dofa_upernet_bolp
 ```
 
-### 2. SatMAE (Stanford SustainLab)
+Add `--smoke-test` for bounded real-data checks; these produce no benchmark
+results. Adapter-specific algorithm flags differ: consult the selected
+script's `--help` before overriding defaults. Heads, optimizer settings, batch
+sizes, and stopping rules retain their adapter-specific defaults.
 
-```bash
-# BigEarthNet DBR
-python methods/satmae/bigearthnet/bigearthnet_dbr.py \
-    --seed 42 \
-    --dbr_alpha 0.5 \
-    --dbr_ema 0.9 \
-    --batch_size 64
-
-# South Africa Crop Type ERM (Custom 1x1 Conv Linear Probe)
-python methods/satmae/sa_crop/sa_crop_erm.py \
-    --seed 42 \
-    --batch_size 32 \
-    --lr 1e-3
-```
-
-### 3. DOFA (Dynamic One-For-All)
-
-```bash
-# EuroSAT BOLP
-python methods/dofa/eurosat/bolp.py \
-    --seed 42 \
-    --bolp_k 2 \
-    --batch_size 128
-
-# MMEarth UPerNet GroupDRO
-python methods/dofa/mmearth_upernet/groupdro.py \
-    --seed 42 \
-    --group_dro_step_size 0.01 \
-    --batch_size 16
-```
-
----
-
-## ⚙️ Standard Training Arguments
-
-All modular scripts accept standard command-line options:
-* `--seed`: Random seed for reproducibility (e.g. 42).
-* `--batch_size`: Batch size per GPU.
-* `--lr`: Initial learning rate (typically `1e-3` for linear probe, `1e-4` for decoders).
-* `--weight_decay`: L2 regularization coefficient (default `1e-4`).
-* `--max_epochs`: Maximum number of training epochs.
-* `--out_dir`: Custom directory to save logs, metrics, and checkpoints.
+For isolated multi-run output directories and source manifests, use
+[`run_matrix.py`](../run_matrix.py). See
+[`cleanup-status.md`](../../docs/cleanup-status.md) for verification coverage.

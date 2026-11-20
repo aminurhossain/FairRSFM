@@ -849,7 +849,7 @@ def compute_demographic_parity_seg(
         true_list = biome_data[b].get("true", [])
 
         yp = np.concatenate([np.asarray(x).ravel() for x in pred_list]) if isinstance(pred_list, list) else np.asarray(pred_list).ravel()
-        if true_list:
+        if len(true_list) > 0:
             yt = np.concatenate([np.asarray(x).ravel() for x in true_list]) if isinstance(true_list, list) else np.asarray(true_list).ravel()
             mask = yt != ignore_index
             yp_v = yp[mask]

@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from fairrsfm.evaluation.checkpoint import load_finetuned_state
+from fairrsfm.evaluation.checkpoint import load_finetuned_state, reject_unified_protocol_checkpoint
 from fairrsfm.evaluation.serialization import json_safe
 from fairrsfm.evaluation.metrics import (
     compute_ece_multilabel,
@@ -23,6 +23,20 @@ from fairrsfm.evaluation.thresholds import load_validation_thresholds, resolve_c
 
 
 class MetricContractTests(unittest.TestCase):
+    def test_standalone_evaluator_rejects_unified_checkpoint(self):
+        with self.assertRaisesRegex(ValueError, "test_selected.json"):
+            reject_unified_protocol_checkpoint({
+                "hyper_parameters": {"method_protocol": {"method": "bolp"}}
+            })
+        reject_unified_protocol_checkpoint({"hyper_parameters": {}})
+
+    def test_all_standalone_evaluators_guard_unified_checkpoints(self):
+        root = Path(__file__).resolve().parents[1] / "src/fairrsfm/evaluation"
+        evaluators = list(root.glob("*/test_*.py"))
+        self.assertEqual(len(evaluators), 12)
+        for path in evaluators:
+            source = path.read_text()
+            self.assertIn("reject_unified_protocol_checkpoint", source, path)
     def test_group_diagnostics_distinguish_spurious_from_missed_classes(self):
         groups = {
             "a": (np.array([0, 0, 1]), np.array([0, 2, 0])),

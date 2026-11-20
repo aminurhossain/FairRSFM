@@ -19,13 +19,13 @@ class GroupDROLossTracker(nn.Module):
     Maintains and updates group weights q_g online using exponentiated gradient ascent.
     
     Formula:
-        loss = sum_g q_g * loss_g
         q_g <- q_g * exp(group_lr * loss_g)
         q <- q / sum(q)
+        loss = sum_g q_g * loss_g  (using the updated probabilities)
     """
     def __init__(self, group_names: List[str], group_lr: float = 0.01):
         super().__init__()
-        self.group_names = sorted(group_names)
+        self.group_names = sorted(set(group_names))
         self.group_lr = group_lr
         self.num_groups = len(self.group_names)
         self.group_to_idx = {g: i for i, g in enumerate(self.group_names)}
@@ -60,14 +60,14 @@ class GroupDROLossTracker(nn.Module):
         if not present_indices:
             return per_sample_loss.mean()
 
-        # Weighted loss combination: sum_g q_g * loss_g (detach q to avoid in-place graph conflict)
+        # Sagawa's official loss.py updates adversarial probabilities BEFORE
+        # taking the dot product. Missing groups have batch loss zero.
+        # Source: https://github.com/kohpangwei/group_DRO/blob/master/loss.py
+        with torch.no_grad():
+            log_q = self.q.log()
+            for idx, l_g in zip(present_indices, present_losses):
+                log_q[idx] += self.group_lr * l_g.detach()
+            self.q.copy_(torch.softmax(log_q, dim=0))
         q_weights = self.q.clone().detach()
         weighted_loss = sum(q_weights[idx] * l_g for idx, l_g in zip(present_indices, present_losses))
-
-        # Online exponentiated gradient ascent update: q_g <- q_g * exp(eta_q * loss_g)
-        with torch.no_grad():
-            for idx, l_g in zip(present_indices, present_losses):
-                self.q[idx] = self.q[idx] * torch.exp(self.group_lr * l_g.detach())
-            self.q.copy_(self.q / self.q.sum())
-
         return weighted_loss

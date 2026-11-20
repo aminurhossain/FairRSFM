@@ -1,8 +1,9 @@
 method: "ERM"
 full_name: "Empirical Risk Minimization"
 type: "unweighted_baseline"
-objective: "cross_entropy"
+objective: "common_task_loss"
 use_biome_during_training: false
+training_subset: "known_biome"
 hyperparameters:
   lr: 0.001
   weight_decay: 0.0001

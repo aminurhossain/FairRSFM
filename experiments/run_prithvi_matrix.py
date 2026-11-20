@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run an isolated Prithvi dataset/method/seed matrix with bounded concurrency."""
+"""Run isolated backbone/dataset/method/seed matrices with bounded concurrency."""
 
 import argparse
 import hashlib
@@ -10,6 +10,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
+from train import get_script_path
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,7 +36,7 @@ def run_job(job: dict, gpu: str) -> tuple[str, int]:
     out_dir.mkdir(parents=True, exist_ok=False)
     command = [
         sys.executable, str(ROOT / "experiments" / "train.py"),
-        "--model", "prithvi", "--dataset", job["dataset"],
+        "--model", job.get("model", "prithvi"), "--dataset", job["dataset"],
         "--method", job["method"], "--seed", str(job["seed"]),
         "--epochs", str(job["epochs"]), "--gpu", gpu,
         "--output_dir", str(out_dir),
@@ -43,6 +44,8 @@ def run_job(job: dict, gpu: str) -> tuple[str, int]:
     env = os.environ.copy()
     if job.get("smoke_test"):
         command.append("--smoke-test")
+    if job.get("batch_size") is not None:
+        command.extend(["--batch-size", str(job["batch_size"])])
     env["PYTHONUNBUFFERED"] = "1"
     (out_dir / "command.json").write_text(
         json.dumps({"argv": command, "gpu": gpu, "started_utc": datetime.now(timezone.utc).isoformat()}, indent=2) + "\n"
@@ -71,33 +74,46 @@ def run_worker(worker_index: int, gpu: str, jobs: list[dict], worker_count: int)
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--models", nargs="+", choices=["prithvi", "satmae", "dofa"], default=["prithvi"])
     parser.add_argument("--methods", nargs="+", choices=METHODS, default=["erm", "bolp"])
     parser.add_argument("--datasets", nargs="+", choices=DATASETS, default=list(DATASETS))
     parser.add_argument("--seeds", nargs="+", type=int, default=[42])
     parser.add_argument("--epochs", type=int, default=50)
+    parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--gpus", nargs="+", required=True,
                         help="One worker per entry; repeat an ID only when sharing GPU memory is safe")
     parser.add_argument("--run-id", required=True, help="Unique name under runs/prithvi_matrix")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--smoke-test", action="store_true", help="Bounded real-model checks; not benchmark results")
     args = parser.parse_args()
-    if args.epochs < 1 or len(set(args.methods)) != len(args.methods) or len(set(args.seeds)) != len(args.seeds):
-        parser.error("epochs must be positive; methods and seeds must be unique")
+    if args.batch_size is not None and args.batch_size < 1:
+        parser.error("batch-size must be positive")
+    if (args.epochs < 1 or len(set(args.methods)) != len(args.methods)
+            or len(set(args.seeds)) != len(args.seeds)
+            or len(set(args.models)) != len(args.models)
+            or len(set(args.datasets)) != len(args.datasets)):
+        parser.error("epochs must be positive; models, datasets, methods, and seeds must be unique")
     if not args.run_id.replace("-", "").replace("_", "").isalnum() or args.run_id in (".", ".."):
         parser.error("run-id must contain only letters, digits, hyphens, or underscores")
 
-    run_root = ROOT / "runs" / "prithvi_matrix" / args.run_id
+    prithvi_only = args.models == ["prithvi"]
+    run_root = ROOT / "runs" / ("prithvi_matrix" if prithvi_only else "matrix") / args.run_id
     jobs = [
-        {"dataset": dataset, "method": method, "seed": seed, "epochs": args.epochs,
+        {"model": model, "dataset": dataset, "method": method, "seed": seed, "epochs": args.epochs,
+         "batch_size": args.batch_size,
          "smoke_test": args.smoke_test,
-         "output_dir": str(run_root / dataset / method / f"seed_{seed}")}
-        for seed in args.seeds for dataset in args.datasets for method in args.methods
+         "output_dir": str((run_root if prithvi_only else run_root / model) / dataset / method / f"seed_{seed}")}
+        for seed in args.seeds for model in args.models for dataset in args.datasets for method in args.methods
     ]
     if run_root.exists():
         parser.error(f"run directory already exists: {run_root}")
     sources = [Path(__file__), ROOT / "experiments" / "train.py"] + [
-        training_script(dataset, method) for dataset in args.datasets for method in args.methods
+        get_script_path(model, dataset, method) for model in args.models for dataset in args.datasets for method in args.methods
     ]
+    sources.extend(sorted((ROOT / "src/fairrsfm/training").glob("*.py")))
+    sources.extend(sorted((ROOT / "src/fairrsfm/methods").glob("*.py")))
+    sources.extend(sorted((ROOT / "src/fairrsfm/data").glob("*.py")))
+    sources.extend(sorted((ROOT / "src/fairrsfm/evaluation").glob("*.py")))
     if args.smoke_test:
         sources.append(ROOT / "experiments" / "smoke_prithvi.py")
     missing_sources = [str(path) for path in sources if not path.is_file()]
@@ -105,7 +121,7 @@ def main() -> int:
         parser.error(f"training source is missing: {missing_sources}")
     print(f"{len(jobs)} jobs; {len(args.gpus)} simultaneous worker(s); output: {run_root}")
     for index, job in enumerate(jobs):
-        print(f"GPU {args.gpus[index % len(args.gpus)]}: {job['dataset']} {job['method']} seed {job['seed']}")
+        print(f"GPU {args.gpus[index % len(args.gpus)]}: {job['model']} {job['dataset']} {job['method']} seed {job['seed']}")
     if args.dry_run:
         return 0
 
@@ -118,7 +134,7 @@ def main() -> int:
             str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
             for path in sources
         },
-        "methods": args.methods, "datasets": args.datasets,
+        "models": args.models, "methods": args.methods, "datasets": args.datasets,
         "seeds": args.seeds, "epochs": args.epochs, "gpus": args.gpus,
         "smoke_test": args.smoke_test,
         "jobs": jobs,

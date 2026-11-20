@@ -155,3 +155,123 @@ class SatMAEClassifier(nn.Module):
         feats = self.encoder(x)
         logits = self.head(feats)
         return logits
+
+
+class SatMAEUperNetSegmentationClassifier(nn.Module):
+    """
+    SatMAE Semantic Segmentation Model with Official UPerNet Decoder.
+    Extracts multi-stage features from blocks [2, 5, 8, 11] and decodes via UPerNet.
+    """
+    def __init__(
+        self,
+        num_classes: int = 10,
+        model_type: str = "vit_base_patch16",
+        checkpoint_path: Optional[str] = None,
+        freeze_backbone: bool = True,
+        fpn_dim: int = 512,
+        out_indices: Optional[list] = None,
+        img_size: int = 224,
+        patch_size: int = 16,
+    ):
+        super().__init__()
+        self.num_classes = num_classes
+        self.out_indices = out_indices if out_indices is not None else [2, 5, 8, 11]
+        self.freeze_backbone = freeze_backbone
+        self.patch_size = patch_size
+        self.grid_size = img_size // patch_size
+        self.G = 3
+        self.channel_groups = ((0, 1, 2, 6), (3, 4, 5, 7), (8, 9))
+
+        if models_vit_group_channels is None:
+            raise ImportError(
+                f"SatMAE group channels module not found at {UPSTREAM_SATMAE_DIR}. "
+                "Ensure upstream/SatMAE is populated."
+            )
+
+        fn = getattr(models_vit_group_channels, model_type)
+        self.backbone = fn(
+            img_size=img_size,
+            patch_size=patch_size,
+            in_chans=10,
+            channel_groups=self.channel_groups,
+            global_pool=False,
+        )
+        self.embed_dim = self.backbone.embed_dim
+
+        if checkpoint_path and Path(checkpoint_path).exists():
+            self.load_pretrained_weights(checkpoint_path)
+
+        if freeze_backbone:
+            for p in self.backbone.parameters():
+                p.requires_grad = False
+            self.backbone.eval()
+
+        from fairrsfm.models.dofa_wrapper import UPerNetHead
+        d = self.embed_dim
+        self.head = UPerNetHead(
+            in_channels=[d, d, d, d],
+            fpn_dim=fpn_dim,
+            num_classes=num_classes,
+            dropout_ratio=0.1,
+        )
+
+    def load_pretrained_weights(self, ckpt_path: str):
+        print(f"[SatMAE] Loading pretrained weights from {ckpt_path}...")
+        ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        state_dict = ckpt.get("model", ckpt.get("state_dict", ckpt))
+
+        model_dict = self.backbone.state_dict()
+        filtered_dict = {k: v for k, v in state_dict.items() if k in model_dict and v.shape == model_dict[k].shape}
+        missing, unexpected = self.backbone.load_state_dict(filtered_dict, strict=False)
+        print(f"[SatMAE] Loaded {len(filtered_dict)}/{len(model_dict)} layers successfully into backbone.")
+
+    def forward_intermediates(self, x: torch.Tensor) -> list:
+        b, c, h, w = x.shape
+        bb = self.backbone
+
+        x_c_embed = []
+        for i, group in enumerate(self.channel_groups):
+            x_c = x[:, group, :, :]
+            x_c_embed.append(bb.patch_embed[i](x_c))
+
+        x_tokens = torch.stack(x_c_embed, dim=1)  # (b, G, L, D)
+        _, G_bb, L, D_bb = x_tokens.shape
+
+        channel_embed = bb.channel_embed.unsqueeze(2)
+        pos_embed = bb.pos_embed[:, 1:, :].unsqueeze(1)
+
+        channel_embed = channel_embed.expand(-1, -1, pos_embed.shape[2], -1)
+        pos_embed = pos_embed.expand(-1, channel_embed.shape[1], -1, -1)
+        pos_channel = torch.cat((pos_embed, channel_embed), dim=-1)
+
+        x_tokens = x_tokens + pos_channel
+        x_tokens = x_tokens.view(b, -1, D_bb)
+
+        cls_pos_channel = torch.cat((bb.pos_embed[:, :1, :], bb.channel_cls_embed), dim=-1)
+        cls_tokens = cls_pos_channel + bb.cls_token.expand(b, -1, -1)
+        x_tokens = torch.cat((cls_tokens, x_tokens), dim=1)
+        x_tokens = bb.pos_drop(x_tokens)
+
+        features = []
+        for i, blk in enumerate(bb.blocks):
+            x_tokens = blk(x_tokens)
+            if i in self.out_indices:
+                patches = x_tokens[:, 1:, :]  # (b, G*L, d)
+                patches_grouped = patches.view(b, self.G, self.grid_size * self.grid_size, self.embed_dim).mean(dim=1)
+                feat = patches_grouped.permute(0, 2, 1).reshape(b, self.embed_dim, self.grid_size, self.grid_size)
+                features.append(feat)
+        return features
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        b, c, h, w = x.shape
+        if self.freeze_backbone:
+            self.backbone.eval()
+            with torch.no_grad():
+                feats = self.forward_intermediates(x)
+        else:
+            feats = self.forward_intermediates(x)
+
+        logits = self.head(feats)  # (b, num_classes, 56, 56)
+        logits = torch.nn.functional.interpolate(logits, size=(h, w), mode="bilinear", align_corners=False)
+        return logits
+
